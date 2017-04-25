@@ -79,16 +79,19 @@ std::ostream& operator<<(std::ostream &strm, const mod_info_t &a);
 
 // information getters
 mod_info_t *GetModuleInfo(ADDRINT addr);
+mod_info_t *GetModuleInfo(string mod_name);
 reg_info_t *GetRegionInfo(ADDRINT addr);
 sec_info_t *GetSectionInfo(ADDRINT addr);
 sec_info_t *GetNextSectionInfo(ADDRINT addr);
 fn_info_t *GetFunctionInfo(ADDRINT addr);
+fn_info_t *GetFunctionInfo(string mod_name, string fn_name);
 string GetAddrInfo(ADDRINT addr);
 
 // module info map
 extern map<string, mod_info_t*> module_info_m;
 extern vector<reg_info_t*> region_info_v;
 extern map<ADDRINT, fn_info_t*> fn_info_m;
+extern map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 
 // XED related
 #ifdef TARGET_IA32e

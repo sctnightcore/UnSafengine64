@@ -470,7 +470,7 @@ void CheckExportFunctions()
 	for (idx = 0; idx < obf_txt_eaddr - obf_txt_saddr; idx += 0x1000)
 	{		
 		blk_addr = obf_txt_saddr + idx;
-		iat_addr_to_obf_fnaddr.clear();		
+		iataddr2obffnaddr.clear();		
 		num_fnaddrs = 0;
 		num_nonfnaddrs = 0;
 
@@ -480,14 +480,13 @@ void CheckExportFunctions()
 		{
 			
 			// target_addr : memory value at 'addr'						
-			// target_addr = toADDRINT(bufp);
 			target_addr = MakeADDR(bufp);
 			if (isDebug) *dout << toHex(addr) << ' ' << toHex(target_addr) << endl;
 
 			// if target_addr is obfuscated function address
 			if (obfaddr2fn.find(target_addr) != obfaddr2fn.end())
 			{				
-				iat_addr_to_obf_fnaddr[addr] = target_addr;
+				iataddr2obffnaddr[addr] = target_addr;
 				if (num_fnaddrs == 0) iat_start_addr = addr;
 				num_fnaddrs++;
 
@@ -535,7 +534,7 @@ found_iat:
 		*fout << "IAT SIZE: ?" << toHex(iat_size * sizeof(ADDRINT)) << endl;
 
 	}
-	for (auto it = iat_addr_to_obf_fnaddr.begin(); it != iat_addr_to_obf_fnaddr.end(); it++)
+	for (auto it = iataddr2obffnaddr.begin(); it != iataddr2obffnaddr.end(); it++)
 	{					
 		ADDRINT srcaddr = it->first;
 		ADDRINT dstaddr = it->second;
@@ -622,7 +621,7 @@ void DLL_TRC_analysis(ADDRINT addr, THREADID threadid)
 {
 	if (threadid != 0) return;
 
-	if (addr == dll_entry_addr) {
+	if (addr == obf_entry_addr) {
 		is_unpack_started = true;
 	}
 
@@ -1034,6 +1033,7 @@ void EXE_IMG_inst(IMG img, void *v)
 				fn_info_t *fninfo = new fn_info_t(imgname, rtnname, saddr, eaddr);
 
 				fn_info_m[saddr] = fninfo;
+				fn_str_2_fn_info[make_pair(imgname, rtnname)] = fninfo;
 
 				module_info_m[imgname]->fn_infos.push_back(fninfo);
 
@@ -1061,8 +1061,7 @@ void DLL_IMG_inst(IMG img, void *v)
 
 	if (imgname == dll_name)
 	{
-		dll_entry_addr = module_addr;
-		if (isDebug) *fout << "DLL Entry Address: " << toHex(dll_entry_addr) << endl;
+		obf_entry_addr = module_addr;
 	}
 
 	mod_info_t *dllinfo = NULL;
@@ -1098,16 +1097,13 @@ void DLL_IMG_inst(IMG img, void *v)
 	dllinfo = new mod_info_t(name, saddr, eaddr);
 	module_info_m[name] = dllinfo;
 
-	if (isDebug) *fout << "Module: " << *dllinfo << endl;
-
 	for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
 	{
 		string secname = SEC_Name(sec);
 		ADDRINT saddr = SEC_Address(sec);
 		ADDRINT eaddr = saddr + SEC_Size(sec);
 		sec_info_t *secinfo = new sec_info_t(imgname, secname, saddr, eaddr);
-		dllinfo->sec_infos.push_back(secinfo);
-		if (isDebug) *fout << "    Section: " << *secinfo << endl;
+		dllinfo->sec_infos.push_back(secinfo);		
 
 		if (SEC_Name(sec) == ".text")
 		{
@@ -1118,6 +1114,7 @@ void DLL_IMG_inst(IMG img, void *v)
 				ADDRINT eaddr = saddr + RTN_Range(rtn);
 				fn_info_t *fninfo = new fn_info_t(imgname, rtnname, saddr, eaddr);
 				fn_info_m[saddr] = fninfo;
+				fn_str_2_fn_info[make_pair(imgname, rtnname)] = fninfo;
 				module_info_m[imgname]->fn_infos.push_back(fninfo);
 			}
 		}
@@ -1147,7 +1144,7 @@ void DLL64_TRC_inst(TRACE trace, void *v)
 		IARG_THREAD_ID,
 		IARG_END);
 
-	if (addr == dll_entry_addr) {
+	if (addr == obf_entry_addr) {
 		is_unpack_started = true;
 	}
 

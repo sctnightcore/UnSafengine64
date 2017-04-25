@@ -31,7 +31,7 @@ map<ADDRINT, string> asmcode_m;
 map<ADDRINT, vector<ADDRINT>*> trace_cache_m;
 
 
-ADDRINT dll_entry_addr;	// themida dll entry address
+ADDRINT obf_entry_addr;	// themida dll entry address
 
 // dll loader information for obfuscated dll analysis
 ADDRINT loader_saddr = 0;
@@ -83,6 +83,7 @@ map<string, mod_info_t*> module_info_m;
 
 // function info
 map<ADDRINT, fn_info_t*> fn_info_m;
+map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 
 // runtime function info
 fn_info_t *current_obf_fn = NULL;
@@ -91,7 +92,7 @@ fn_info_t *current_obf_fn = NULL;
 map<ADDRINT, fn_info_t*> obfaddr2fn;
 
 // map from obfuscated address to original address in IAT
-map<ADDRINT, ADDRINT> iat_addr_to_obf_fnaddr;
+map<ADDRINT, ADDRINT> iataddr2obffnaddr;
 
 // obfuscated call instruction address and target address
 vector<pair<ADDRINT, ADDRINT>> obf_call_addrs;

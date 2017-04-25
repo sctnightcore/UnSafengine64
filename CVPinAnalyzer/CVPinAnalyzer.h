@@ -67,7 +67,7 @@ map<string, mod_info_t*> module_info_m;
 
 // function info
 map<ADDRINT, fn_info_t*> fn_info_m;
-
+map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 
 // Memory Trace Instrumentation
 void EXE_TRC_Memtrc_analysis(ADDRINT addr, THREADID threadid);

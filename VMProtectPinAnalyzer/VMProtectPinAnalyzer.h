@@ -6,7 +6,6 @@
 #include "StrUtil.h"
 #include "PinSymbolInfoUtil.h"
 
-
 // obfuscated module information
 ADDRINT obf_img_saddr = 0;	// section start address where eip is changed into 
 ADDRINT obf_img_eaddr = 0;
@@ -39,7 +38,7 @@ map<ADDRINT, ADDRINT> trace_next_addr_m;
 UINT8 memory_buffer[1024*1024];	// code cache buffer size is 1MB
 
 
-ADDRINT dll_entry_addr;	// VMProtect dll entry address
+ADDRINT obf_entry_addr;	// VMProtect dll entry address
 
 // dll loader information for obfuscated dll analysis
 ADDRINT loader_saddr = 0;
@@ -91,6 +90,7 @@ map<string, mod_info_t*> module_info_m;
 
 // function info
 map<ADDRINT, fn_info_t*> fn_info_m;
+map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 
 // runtime function info
 fn_info_t *current_obf_fn = NULL;
@@ -99,18 +99,16 @@ fn_info_t *current_obf_fn = NULL;
 map<ADDRINT, fn_info_t*> obfaddr2fn;
 
 // map from obfuscated address to original address in IAT
-map<ADDRINT, ADDRINT> iat_addr_to_obf_fnaddr;
+map<ADDRINT, ADDRINT> iataddr2obffnaddr;
 
 
 // obfuscated call information struct
 struct call_info_t {
-	bool is_push_before_call;
-	bool is_nop_or_ret_or_int3_after_call;
-	bool is_call_esi_after_call;
+	bool is_push_before_call;	
 	ADDRINT caller_addr;
 	ADDRINT target_addr;
-	call_info_t(bool chk1, bool chk2, bool chk3, ADDRINT caller, ADDRINT target) :
-		is_push_before_call(chk1), is_nop_or_ret_or_int3_after_call(chk2), is_call_esi_after_call(chk3), caller_addr(caller), target_addr(target) {};
+	call_info_t(bool chk1, ADDRINT caller, ADDRINT target) :
+		is_push_before_call(chk1), caller_addr(caller), target_addr(target) {};
 };
 
 // obfuscated call instruction address and target address
@@ -122,8 +120,9 @@ bool isCheckAPIStart = false;
 bool isCheckAPIRunning = false;
 size_t current_obf_fn_pos = 0;
 
-vector<ADDRINT> checkCallSequence;
-map<REG, string> movRegFns;
+vector<ADDRINT> traceAddrSeq;
+vector<ADDRINT> traceSPSeq;
+map<REG, pair<ADDRINT, string>> movRegApiFnAddrs;
 
 // ADDRINT caller_addr = 0;
 call_info_t *current_obfuscated_call;
@@ -163,6 +162,13 @@ ADDRINT toADDRINT1(UINT8 *buf) {
 
 #define RECORDTRACE 1
 
+// registers used for obfuscation
+#ifdef TARGET_IA32
+REG regs_for_obfuscation[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI };
+#elif TARGET_IA32E
+REG regs_for_obfuscation[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI };
+#endif	
+
 
 void clear_mwblocks();
 void clear_meblocks();
@@ -190,6 +196,8 @@ void EXE_INS_OEPDetect_MW_analysis(CONTEXT *ctxt, ADDRINT ip, ADDRINT nextip, si
 
 void EXE_TRC_APIDetect_inst(TRACE trace, void *v);
 void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid);
-void check_api_fn_assignment_to_register(LEVEL_VM::CONTEXT * ctxt);
-REG check_reg_call(std::string &disasm);
+void restore_regs(LEVEL_VM::CONTEXT * ctxt);
+REG check_api_fn_assignment_to_register(LEVEL_VM::CONTEXT * ctxt);
+REG check_reg_call_ins(std::string &disasm);
+bool check_abnormal_ins(std::string &disasm);
 void INS_APIDetect_MW_analysis(ADDRINT targetAddr, ADDRINT insaddr);

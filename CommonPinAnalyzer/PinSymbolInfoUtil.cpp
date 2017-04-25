@@ -113,6 +113,13 @@ fn_info_t *GetFunctionInfo(ADDRINT addr)
 	return NULL;
 }
 
+fn_info_t * GetFunctionInfo(string mod_name, string fn_name)
+{		
+	auto it = fn_str_2_fn_info.find(make_pair(mod_name, fn_name));
+	if (it == fn_str_2_fn_info.end()) return nullptr;
+	return it->second;
+}
+
 fn_info_t *GetFunctionInfo(mod_info_t *modinfo, ADDRINT addr)
 {	
 	if (modinfo == NULL) return NULL;
