@@ -3,3 +3,22 @@
 ################################################################################
 
 *.suo
+*.db
+*.sqlite
+*.json
+*.lastbuildstate
+*.tlog
+*.log
+*.obj
+*.user
+*.pdb
+*.idb
+*.ipch
+*.filters
+*.opendb
+*.db-shm
+*.db-wal
+*.sbr
+*.sdf
+*.bak
+*.hwp

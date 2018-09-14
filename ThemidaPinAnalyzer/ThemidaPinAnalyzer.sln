@@ -1,26 +1,15 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
-VisualStudioVersion = 15.0.26228.4
+VisualStudioVersion = 15.0.26228.43
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ThemidaPinAnalyzer", "ThemidaPinAnalyzer.vcxproj", "{639EF517-FCFC-408E-9500-71F0DC0458DB}"
-	ProjectSection(ProjectDependencies) = postProject
-		{4FF99054-2D10-4E27-947C-8C87DCDC9091} = {4FF99054-2D10-4E27-947C-8C87DCDC9091}
-	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CVPinAnalyzer", "..\CVPinAnalyzer\CVPinAnalyzer.vcxproj", "{A3353FB7-0ABB-4571-854F-38BF965B9C2B}"
-	ProjectSection(ProjectDependencies) = postProject
-		{4FF99054-2D10-4E27-947C-8C87DCDC9091} = {4FF99054-2D10-4E27-947C-8C87DCDC9091}
-	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "CommonPinAnalyzer", "..\CommonPinAnalyzer\CommonPinAnalyzer.vcxproj", "{4FF99054-2D10-4E27-947C-8C87DCDC9091}"
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "VMProtectPinAnalyzer", "..\VMProtectPinAnalyzer\VMProtectPinAnalyzer.vcxproj", "{6480A349-497D-45CC-AA58-D223B12F4C81}"
-	ProjectSection(ProjectDependencies) = postProject
-		{A3353FB7-0ABB-4571-854F-38BF965B9C2B} = {A3353FB7-0ABB-4571-854F-38BF965B9C2B}
-	EndProjectSection
-EndProject
-Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PinDmp", "..\PinDmp\PinDmp.vcxproj", "{C4F6C534-AE65-43CE-9544-0EE292A8B193}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -79,20 +68,11 @@ Global
 		{6480A349-497D-45CC-AA58-D223B12F4C81}.Test|Win32.Build.0 = Test|Win32
 		{6480A349-497D-45CC-AA58-D223B12F4C81}.Test|x64.ActiveCfg = Test|x64
 		{6480A349-497D-45CC-AA58-D223B12F4C81}.Test|x64.Build.0 = Test|x64
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Debug|Win32.ActiveCfg = Debug|Win32
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Debug|Win32.Build.0 = Debug|Win32
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Debug|x64.ActiveCfg = Debug|x64
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Debug|x64.Build.0 = Debug|x64
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Release|Win32.ActiveCfg = Release|Win32
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Release|Win32.Build.0 = Release|Win32
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Release|x64.ActiveCfg = Release|x64
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Release|x64.Build.0 = Release|x64
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Test|Win32.ActiveCfg = Release|Win32
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Test|Win32.Build.0 = Release|Win32
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Test|x64.ActiveCfg = Release|x64
-		{C4F6C534-AE65-43CE-9544-0EE292A8B193}.Test|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6D842B51-1655-47D1-BFF4-2DACFBF009C5}
 	EndGlobalSection
 EndGlobal

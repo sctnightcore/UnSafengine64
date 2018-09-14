@@ -8,13 +8,8 @@ using namespace std;
 /* ===================================================================== */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE,  "pintool", "o", "result.txt", "specify file name for the result");
 KNOB<string> KnobDLLFile(KNOB_MODE_WRITEONCE, "pintool", "dll", "", "specify packed dll file");
-KNOB<bool> KnobMemoryTrace(KNOB_MODE_WRITEONCE,  "pintool", "memtrace", "1", "specify whether to record memory trace or not");
-KNOB<bool> KnobAPIDetect(KNOB_MODE_WRITEONCE,  "pintool", "apidetect", "0", "specify api detection");
-KNOB<string> KnobDebug(KNOB_MODE_WRITEONCE,  "pintool", "debug", "", "specify debug output file and turn on debug mode");
-KNOB<UINT32> KnobAttachDebugger(KNOB_MODE_WRITEONCE, "pintool", "attach", "0", "specify number of seconds to wait until a debugger to attach at OEP");
-KNOB<string> KnobTraceStartAddr(KNOB_MODE_WRITEONCE, "pintool", "trsaddr", "0", "instruction trace start address");
-KNOB<string> KnobTraceEndAddr(KNOB_MODE_WRITEONCE, "pintool", "treaddr", "0", "instruction trace end address");
-KNOB<bool> KnobOEPDetect(KNOB_MODE_WRITEONCE, "pintool", "oepdetect", "0", "specify oep detection");
+KNOB<BOOL> KnobDirectCall(KNOB_MODE_WRITEONCE, "pintool", "direct", "", "direct call");
+
 
 // ========================================================================================================================
 // memory section write & execute check by block
@@ -28,6 +23,7 @@ set<ADDRINT> mwaddrs;
 size_t mwblocks[MAX_BLOCKS];
 size_t meblocks[MAX_BLOCKS];
 
+#define LOG_CALL_CHECK 1
 
 void clear_mwblocks()
 {
@@ -41,13 +37,13 @@ void clear_meblocks()
 
 ADDRINT blk2addr(unsigned blk)
 {
-	return obf_img_saddr + blk * BLOCK_SIZE;
+	return main_img_saddr + blk * BLOCK_SIZE;
 }
 
 // memory write check
 bool set_mwblock(ADDRINT addr)
 {
-	size_t idx = (addr - obf_img_saddr) / BLOCK_SIZE;
+	size_t idx = (addr - main_img_saddr) / BLOCK_SIZE;
 	if (idx > MAX_BLOCKS) return false;
 
 	// if this block is previously executed, set meblock to zero
@@ -65,7 +61,7 @@ bool set_mwblock(ADDRINT addr)
 
 size_t get_mwblock(ADDRINT addr)
 {
-	size_t idx = (addr - obf_img_saddr) / BLOCK_SIZE;
+	size_t idx = (addr - main_img_saddr) / BLOCK_SIZE;
 	if (idx > MAX_BLOCKS) return false;
 	return mwblocks[idx];
 }
@@ -73,7 +69,7 @@ size_t get_mwblock(ADDRINT addr)
 // memory execute check
 bool set_meblock(ADDRINT addr)
 {
-	size_t idx = (addr - obf_img_saddr) / BLOCK_SIZE;
+	size_t idx = (addr - main_img_saddr) / BLOCK_SIZE;
 	if (idx > MAX_BLOCKS) return false;		
 	meblocks[idx]++;
 	return true;
@@ -81,7 +77,7 @@ bool set_meblock(ADDRINT addr)
 
 size_t get_meblock(ADDRINT addr)
 {
-	size_t idx = (addr - obf_img_saddr) / BLOCK_SIZE;
+	size_t idx = (addr - main_img_saddr) / BLOCK_SIZE;
 	if (idx > MAX_BLOCKS) return false;
 	return meblocks[idx];
 }
@@ -92,16 +88,18 @@ size_t get_meblock(ADDRINT addr)
 // ========================================================================================================================
 
 
-void FindAPICalls() {
-	// *fout << "Find API Calls" << endl;
-	
-	size_t txtsize = obf_txt_eaddr - obf_txt_saddr;;
+void FindAPICalls() {	
+	isFoundAPICalls = true;
+#if LOG_CALL_CHECK == 1
+	*fout << "# Find API Calls" << endl;
+#endif
+	size_t txtsize = main_txt_eaddr - main_txt_saddr;;
 	UINT8 *buf = (UINT8*)malloc(txtsize);
 	size_t idx;
 	ADDRINT addr, target_addr;
 	ADDRINT iat_start_addr = 0, iat_size = 0;
 
-	unsigned char* pc = reinterpret_cast<unsigned char*>(obf_txt_saddr);
+	unsigned char* pc = reinterpret_cast<unsigned char*>(main_txt_saddr);
 
 	// buf has executable memory image
 	EXCEPTION_INFO *pExinfo = NULL;
@@ -116,7 +114,7 @@ void FindAPICalls() {
 		// CALL rel32; ?? (E8 __ __ __ __ ; ??)
 		if (buf[idx] == 0xE8)
 		{
-			addr = obf_txt_saddr + idx;
+			addr = main_txt_saddr + idx;
 						
 			
 			// PATTERN 1-1: MOV reg, [e_api_fn] / ... / CALL r32 -> CALL imm32; RET or NOP / ... / CALL r32
@@ -183,7 +181,7 @@ void FindAPICalls() {
 
 			target_addr = addr + 5 + buf[idx + 1] + (buf[idx + 2] << 8) + (buf[idx + 3] << 16) + (buf[idx + 4] << 24);
 
-			if (target_addr >= obf_txt_saddr && target_addr < obf_txt_eaddr)
+			if (target_addr >= main_txt_saddr && target_addr < main_txt_eaddr)
 			{
 				continue;	// skip function call into the same section
 			}
@@ -198,10 +196,9 @@ void FindAPICalls() {
 				current_section->saddr != target_section->saddr) {
 
 #if LOG_CALL_CHECK == 1
-				*fout << "Obfuscated Call : " << toHex(addr) << " -> " << toHex(target_addr) << endl;
+				*fout << "# Obfuscated Call : " << toHex(addr) << " -> " << toHex(target_addr) << endl;
 #endif
 				call_info_t* cinfo = new call_info_t(pattern_before_push_reg, addr, target_addr);
-				// obfuscated_call_candidate_addrs.push_back(make_pair(addr, target_addr));
 				obfuscated_call_candidate_addrs.push_back(cinfo);
 			}
 		}
@@ -218,19 +215,35 @@ bool FindGap()
 {
 	bool retVal = false;
 
-	size_t size_iat = obfaddr2fn.size() * 8;
+	size_t size_iat = (isDirectCall?mov_obfaddr2fn.size():obfaddr2fn.size()) * sizeof(ADDRINT);
 
 	sec_info_t *nextsection = GetNextSectionInfo(obf_rdata_saddr);
 
-	ADDRINT gap_start_addr = obf_rdata_eaddr + 0x100 - obf_rdata_eaddr % 0x100;
+	ADDRINT gap_start_addr;	// obf_rdata_eaddr - 0x100 - obf_rdata_eaddr % 0x100;
+	gap_start_addr = obf_rdata_saddr;
 
+	LOG("number of mov_direct:" + toHex(mov_obfaddr2fn.size()) + '\n');
 	LOG(".rdata " + toHex(obf_rdata_saddr) + '\n');
+	LOG("next section saddr: " + toHex(nextsection->saddr) + '\n');
 	LOG("Size of IAT in bytes: " + toHex(size_iat) + '\n');
 	LOG("gap start address " + toHex(gap_start_addr) + '\n');
 
+	// addrZeroBlk = gap_start_addr;
+	addrZeroBlk = obf_rdata_saddr;
+
+	EXCEPTION_INFO *pExinfo = NULL;
+	size_t numcopied = PIN_SafeCopyEx(memory_buffer, (VOID*)obf_rdata_saddr, obf_rdata_eaddr - obf_rdata_saddr, pExinfo);
+
+	for (ADDRINT addr = obf_rdata_saddr; addr < obf_rdata_eaddr; addr += sizeof(ADDRINT)) {			
+		ADDRINT val = toADDRINT(memory_buffer + addr - obf_rdata_saddr);
+		if (GetAddrInfo(val) == "") {
+			// insert RVA of function slot
+			function_slots_in_rdata.push_back(addr - main_img_saddr);
+		}
+	}
+	
 	if (nextsection->saddr - gap_start_addr < size_iat) return false;
 	
-	addrZeroBlk = gap_start_addr;
 	return true;
 }
 
@@ -239,11 +252,11 @@ bool FindGap()
 void CheckExportFunctions()
 {
 
-	size_t blksize = obf_txt_eaddr - addrZeroBlk;;
+	size_t blksize = main_txt_eaddr - addrZeroBlk;;
 
 	map<string, fn_info_t*> sorted_api_map;
-	for (auto it = obfaddr2fn.begin(); it != obfaddr2fn.end(); it++) {
-		fn_info_t *fninfo = it->second;
+	for (auto it: (isDirectCall?mov_obfaddr2fn:obfaddr2fn)) {	
+		fn_info_t *fninfo = it.second;
 		string key = fninfo->module_name + '.' + fninfo->name;
 		sorted_api_map[key] = fninfo;
 		// LOG(toHex(fninfo->saddr) + ' ' + key + "\n");
@@ -253,22 +266,36 @@ void CheckExportFunctions()
 
 	ADDRINT current_addr = addrZeroBlk;
 	ADDRINT rel_addr = 0;
-	size_t idx = 0;
 	vector<pair<ADDRINT, fn_info_t*>> result_vec;
-	for (auto it = sorted_api_map.begin(); it != sorted_api_map.end(); it++) {
-		// assign resolved function address to candidate IAT area
-		fn_info_t *fninfo = it->second;		
-		result_vec.push_back(make_pair(current_addr - obf_img_saddr, it->second));
-		current_addr += sizeof(ADDRINT);
-		idx++;
+	
+	auto it1 = function_slots_in_rdata.begin();
+	for (auto it2 : sorted_api_map) {
+		fn_info_t *fninfo = it2.second;
+		ADDRINT addr = *it1;
+		result_vec.push_back(make_pair(addr, fninfo));
+		it1++;
 	}
+	
+	//for (auto it = sorted_api_map.begin(); it != sorted_api_map.end(); it++) {
+	//	// assign resolved function address to candidate IAT area
+	//	fn_info_t *fninfo = it->second;		
+	//	result_vec.push_back(make_pair(current_addr - obf_img_saddr, it->second));
+	//	current_addr += sizeof(ADDRINT);
+	//	idx++;
+	//}
 
 	// print IAT info
-	*fout << "IAT START: " << toHex(addrZeroBlk - obf_img_saddr) << endl;
-	*fout << "IAT SIZE: " << toHex(idx * sizeof(ADDRINT)) << endl;
-	for (auto it = result_vec.begin(); it != result_vec.end(); it++) {
+	*fout << "IAT START: " << toHex(addrZeroBlk - main_img_saddr) << endl;
+	*fout << "IAT SIZE: " << toHex(function_slots_in_rdata.size() * sizeof(ADDRINT)) << endl;
+	/*for (auto it = result_vec.begin(); it != result_vec.end(); it++) {
 		*fout << toHex(it->first) << "\taddr\t" << it->second->module_name << '\t' << it->second->name << endl;
+	}*/
+
+	for (auto it : result_vec)
+	{
+		*fout << toHex(it.first) << "\taddr\t" << it.second->module_name << '\t' << it.second->name << endl;
 	}
+
 }
 
 
@@ -276,14 +303,14 @@ void CheckExportFunctions()
 void FindExistingIAT()
 {
 	EXCEPTION_INFO *pExinfo = NULL;
-	size_t img_size = obf_img_eaddr - obf_img_saddr;
+	size_t img_size = main_img_eaddr - main_img_saddr;
 	if (img_size > sizeof(memory_buffer)) {	
 		*fout << "Image size too big. Please resize the buffer." << endl;
 		((ofstream*)fout)->close();
 		exit(0);
 	}
 
-	size_t numcopied = PIN_SafeCopyEx(memory_buffer, (VOID*)obf_img_saddr, img_size, pExinfo);
+	size_t numcopied = PIN_SafeCopyEx(memory_buffer, (VOID*)main_img_saddr, img_size, pExinfo);
 
 	vector<pair<size_t, ADDRINT>> IATCandidates;
 	
@@ -337,12 +364,21 @@ void FindExistingIAT()
 
 
 // API detect analysis function
-void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
+void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 {
 	if (threadid != 0) return;
 	// if (oep) *fout << toHex(addr) << endl;
 
+#if DEBUG == 1
+
+	* fout << toHex(addr) << ' '<< GetAddrInfo(addr) << endl;
+#endif
+
 	if (isCheckAPIRunning) {
+#if LOG_CALL_CHECK == 1
+		*fout << "# CheckAPI running " << toHex(addr) << ' ' << GetAddrInfo(addr) << endl;
+		string addrinfo = GetAddrInfo(addr);
+#endif
 
 		ADDRINT caller_addr = current_obfuscated_call->caller_addr;
 		ADDRINT prev_addr = 0;
@@ -350,14 +386,16 @@ void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID t
 		{
 			prev_addr = *traceAddrSeq.rbegin();
 		}
+
 		fn_info_t *fninfo = GetFunctionInfo(addr);
 		ADDRINT stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);
 		
 		traceAddrSeq.push_back(addr);
 		traceSPSeq.push_back(stkptr);
 
+		size_t cnt = 0;
 		for (auto ins_addr : *trace_cache_m[addr])
-		{
+		{			
 			string asmcode = asmcode_m[ins_addr];
 			
 			// if abnormal instruction, leave
@@ -367,13 +405,15 @@ void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID t
 				isCheckAPIRunning = false;
 				goto check_api_start;
 			}			
-		}
+			// only check 10 instruction
+			if (cnt++ > 10) break;			
+		} 
 		
 #if LOG_CALL_CHECK == 1
-		*fout << "Checking : " << GetAddrInfo(addr) << " ESP:" << toHex(stkptr) << " T:" << toHex(addr) << endl;
+		*fout << "# Checking : " << GetAddrInfo(addr) << " ESP:" << toHex(stkptr) << " T:" << toHex(addr) << endl;
 		for (auto ins_addr : *trace_cache_m[addr])
 		{
-			*fout << toHex(ins_addr) << ' ' << asmcode_m[ins_addr] << endl;
+			*fout << "# " << toHex(ins_addr) << ' ' << asmcode_m[ins_addr] << endl;
 		}
 #endif
 
@@ -401,17 +441,19 @@ void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID t
 			{				
 				ADDRINT trc_last_ins_addr = *trace_cache_m[prev_addr]->rbegin();
 #if LOG_CALL_CHECK == 1
-				*fout << "MOV Caller address: " << toHex(caller_addr) << endl;
-				*fout << "MOV return address: " << toHex(addr) << endl;
-				*fout << "MOV next to Caller address: " << toHex(trace_next_addr_m[caller_addr]) << endl;
-				*fout << "SP before mov call: " << toHex(traceSPSeq[0]) << endl;
-				*fout << "SP after mov call : " << toHex(stkptr) << endl;
+				*fout << "# MOV Caller address: " << toHex(caller_addr) << endl;
+				*fout << "# MOV return address: " << toHex(addr) << endl;
+				*fout << "# MOV next to Caller address: " << toHex(trace_next_addr_m[caller_addr]) << endl;
+				*fout << "# SP before mov call: " << toHex(traceSPSeq[0]) << endl;
+				*fout << "# SP after mov call : " << toHex(stkptr) << endl;
 #endif
 				ADDRINT adjusted_caller_addr = addr - 6;
 				ADDRINT api_fn_addr = movRegApiFnAddrs[set_api_reg].first;
 				fninfo = GetFunctionInfo(api_fn_addr);
-				*fout << toHex(adjusted_caller_addr - obf_img_saddr) << "\tmov\t" << fninfo->module_name << '\t' << fninfo->name << endl;
+
+				*fout << toHex(adjusted_caller_addr - main_img_saddr) << "\tmov-" << REG_StringShort(set_api_reg) << '\t' << fninfo->module_name << '\t' << fninfo->name << endl;
 				obfaddr2fn[current_obf_fn_addr] = fninfo;
+				mov_obfaddr2fn[current_obf_fn_addr] = fninfo;				
 			}
 			isCheckAPIStart = true;
 			isCheckAPIRunning = false;
@@ -419,7 +461,7 @@ void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID t
 		}
 
 		// skip obfuscated code
-		if (addr >= obf_txt_eaddr && addr < obf_img_eaddr)
+		if (addr >= main_txt_eaddr && addr < main_img_eaddr)
 		{
 			return;
 		}
@@ -429,7 +471,7 @@ void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID t
 
 		// skip user exception by false positive find api calls
 		if (fninfo->name.find("KiUserExceptionDispatcher") != string::npos)
-		{
+		{			
 			isCheckAPIStart = true;
 			isCheckAPIRunning = false;
 			goto check_api_start;
@@ -490,15 +532,15 @@ void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID t
 		}
 
 #if LOG_CALL_CHECK == 1
-		*fout << "Caller address: " << toHex(caller_addr) << endl;
-		*fout << "return address: " << toHex(stk_top_value) << endl;
-		*fout << "next to Caller address: " << toHex(trace_next_addr_m[caller_addr]) << endl;
-		*fout << "SP before call: " << toHex(traceSPSeq[0]) << endl;
-		*fout << "SP at API function: " << toHex(stkptr) << endl;
-		*fout << "call type: " << call_type << endl;
+		*fout << "# Caller address: " << toHex(caller_addr) << endl;
+		*fout << "# return address: " << toHex(stk_top_value) << endl;
+		*fout << "# next to Caller address: " << toHex(trace_next_addr_m[caller_addr]) << endl;
+		*fout << "# SP before call: " << toHex(traceSPSeq[0]) << endl;
+		*fout << "# SP at API function: " << toHex(stkptr) << endl;
+		*fout << "# call type: " << call_type << endl;
 #endif
 
-		*fout << toHex(adjusted_caller_addr - obf_img_saddr) << '\t' << call_type << '\t' << fninfo->module_name << '\t' << fninfo->name << endl;
+		*fout << toHex(adjusted_caller_addr - main_img_saddr) << '\t' << call_type << '\t' << fninfo->module_name << '\t' << fninfo->name << endl;
 		obfaddr2fn[current_obf_fn_addr] = fninfo;
 
 		isCheckAPIStart = true;
@@ -511,21 +553,28 @@ check_api_start:
 	// check whether the execution trace go into API function.
 	// Therefore IP is changed into obfuscated function call one by one
 	if (isCheckAPIStart) {
-		restore_regs(ctxt);
+		if (isRegSaved) {
+			restore_regs(ctxt);
+		}
+		else {
+			save_regs(ctxt);
+			isRegSaved = true;
+		}
 
 		if (current_obf_fn_pos == obfuscated_call_candidate_addrs.size()) {
 			// when checking obfuscated call finished, prepare the end 
 			isCheckAPIStart = false;
 			isCheckAPIEnd = true;
+
 #if LOG_CALL_CHECK == 1
-			*fout << "Checking End " << current_obf_fn_pos << endl;
+			*fout << "# Checking End " << current_obf_fn_pos << endl;
 #endif
 
 			goto check_api_end;
 		}
 		call_info_t *callinfo = obfuscated_call_candidate_addrs.at(current_obf_fn_pos++);
 #if LOG_CALL_CHECK == 1
-		*fout << "Checking : " << toHex(callinfo->caller_addr) << ' ' << current_obf_fn_pos << '/' << obfuscated_call_candidate_addrs.size() << endl;				
+		*fout << "# Checking : " << toHex(callinfo->caller_addr) << ' ' << current_obf_fn_pos << '/' << obfuscated_call_candidate_addrs.size() << endl;				
 #endif
 		traceAddrSeq.clear();
 		traceSPSeq.clear();
@@ -550,16 +599,15 @@ check_api_start:
 check_api_end:
 	if (isCheckAPIEnd) {
 		// after checking obfuscated calls, terminate.
-		// *fout << "end" << endl;
 		if (FindGap()) {
 #if LOG_CALL_CHECK == 1
-			*fout << "Searching for IAT" << endl;
+			*fout << "# Searching for IAT - Gap" << endl;
 #endif
 			CheckExportFunctions();
 		}
 		else {
 #if LOG_CALL_CHECK == 1
-			*fout << "Searching for IAT" << endl;
+			*fout << "# Searching for IAT - No Gap" << endl;
 #endif
 			FindExistingIAT();
 		}
@@ -571,8 +619,15 @@ check_api_end:
 
 void restore_regs(LEVEL_VM::CONTEXT * ctxt)
 {
-	for (REG reg : regs_for_obfuscation) {
-		PIN_SetContextReg(ctxt, reg, (ADDRINT)reg);
+	for (REG reg : regs_ctx) {
+		PIN_SetContextReg(ctxt, reg, regs_saved[reg]);
+	}
+}
+
+void save_regs(LEVEL_VM::CONTEXT * ctxt)
+{
+	for (REG reg : regs_ctx) {
+		regs_saved[reg] = PIN_GetContextReg(ctxt, reg);
 	}
 }
 
@@ -582,14 +637,20 @@ REG check_api_fn_assignment_to_register(LEVEL_VM::CONTEXT * ctxt)
 	for (REG reg : regs_for_obfuscation) {
 		ADDRINT reg_val = PIN_GetContextReg(ctxt, reg);
 		fn_info_t *fn = GetFunctionInfo(reg_val);
-		*fout << "MOV " << REG_StringShort(reg) << ", " << toHex(reg_val) << ' ';
+#if LOG_CALL_CHECK == 1
+		*fout << "# MOV " << REG_StringShort(reg) << ", " << toHex(reg_val) << ' ';
+#endif
 		if (fn)
 		{			
 			set_api_reg = reg;
 			movRegApiFnAddrs[reg] = make_pair(reg_val, fn->detailed_name());
+#if LOG_CALL_CHECK == 1
 			*fout << fn->detailed_name();
+#endif
 		}
+#if LOG_CALL_CHECK == 1
 		*fout << endl;		
+#endif
 	}	
 	return set_api_reg;
 }
@@ -619,7 +680,7 @@ REG check_reg_call_ins(std::string &disasm)
 
 bool check_abnormal_ins(std::string & disasm)
 {
-	string abnormal_ins_set[] = { "leave", "in", "out", "far", "hlt", "mov esp"};
+	string abnormal_ins_set[] = { "leave ", "in ", "out ", "far ", "hlt ", "mov esp"};
 	for (auto ins : abnormal_ins_set)
 	{
 		if (disasm.find(ins) != string::npos) return true;
@@ -628,11 +689,11 @@ bool check_abnormal_ins(std::string & disasm)
 }
 
 // EXE trace instrumentation function
-void EXE_TRC_APIDetect_inst(TRACE trace, void *v)
+void TRC_inst(TRACE trace, void *v)
 {
 	ADDRINT addr = TRACE_Address(trace);
 	
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)TRC_APIDetect_analysis,
+	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)TRC_analysis,
 		IARG_CONTEXT,
 		IARG_ADDRINT, addr,
 		IARG_UINT32, TRACE_Size(trace), 
@@ -642,7 +703,8 @@ void EXE_TRC_APIDetect_inst(TRACE trace, void *v)
 	trace_cache_m[addr] = new vector<ADDRINT>;
 	trace_next_addr_m[addr] = addr + TRACE_Size(trace);
 
-	// instrument each memory read/write instruction	
+	// Instrument memory write to find OEP in executable
+	// and set instruction cache	
 	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
 	{
 		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
@@ -651,11 +713,11 @@ void EXE_TRC_APIDetect_inst(TRACE trace, void *v)
 			asmcode_m[insaddr] = INS_Disassemble(ins);			
 			trace_cache_m[addr]->push_back(insaddr);
 
-			if (INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins))
+			if (!isDLLAnalysis && INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins))
 			{
 				// *fout << "MWC:" << toHex(insaddr) << ' ' << asmcode_m[insaddr] << endl;
 				INS_InsertPredicatedCall(
-					ins, IPOINT_BEFORE, (AFUNPTR)INS_APIDetect_MW_analysis,
+					ins, IPOINT_BEFORE, (AFUNPTR)INS_MW_analysis,
 					IARG_MEMORYWRITE_EA,
 					IARG_ADDRINT, insaddr, 
 					IARG_END);
@@ -663,214 +725,56 @@ void EXE_TRC_APIDetect_inst(TRACE trace, void *v)
 		}
 	}
 
-	if (addr >= obf_txt_saddr && addr < obf_txt_eaddr)
+	// OEP detection for EXE and
+	// DLL unpack finish detection for DLL	
+	if (isDLLAnalysis)
 	{
+		// DLL unpack detection
+		if (addr == obf_dll_entry_addr) {
+			is_unpack_started = true;
+		}
 
-		if (isDebug) *fout << ".text exe:" << toHex(addr) << ' ' << asmcode_m[addr] << endl;
+		// Unpacking DLL is done after executing DLLEntry. 
+		// After DLLEntry function is executed, return to DLL Loader or the DllMain in the text section is executed. 
+		if (is_unpack_started && ((addr >= loader_saddr && addr < loader_eaddr) || (addr >= main_txt_saddr && addr < main_txt_eaddr)))
+		{
+			if (!isFoundAPICalls) {
+				FindAPICalls();
+				isCheckAPIStart = true;
+			}
+		}
+	}
+	else
+	{
+		if (addr >= main_txt_saddr && addr < main_txt_eaddr)
+		{
+			// find OEP 
+			if (oep == 0) {
+				set_meblock(addr);
+				if (get_mwblock(addr) && get_meblock(addr) == 1)
+				{
+					BBL bbl = TRACE_BblHead(trace);
+					INS ins = BBL_InsHead(bbl);
 
-		// find OEP and then near OEP
-		// Debugger stops when HWBP is set on OEP
-		// but HWBP on near OEP works well
-		if (oep == 0) {
-			// *fout << "OEP" << endl;
-			set_meblock(addr);
-			if (get_mwblock(addr) && get_meblock(addr) == 1)
-			{
-				
-				BBL bbl = TRACE_BblHead(trace);
-				INS ins = BBL_InsHead(bbl);
-
-				// *fout << "OEP candidates:" << toHex(addr) << ' ';
-				// *fout << INS_Disassemble(ins) << ' ' << INS_IsRet(ins) << ' ' << INS_IsCall(ins) << endl;
-				if (!INS_IsRet(ins) /* && !INS_IsCall(ins)*/ ) {
-					oep = addr;
-					*fout << "OEP:" << toHex(oep - obf_img_saddr) << endl;
-					FindAPICalls();					
-					isCheckAPIStart = true;
-				}				
-			} 
+					if (!INS_IsRet(ins) /* && !INS_IsCall(ins)*/) {
+						oep = addr;
+						*fout << "OEP:" << toHex(oep - main_img_saddr) << endl;
+						FindAPICalls();
+						isCheckAPIStart = true;
+					}
+				}
+			}
 		}
 	}
 }
 
 // EXE INS memory write analysis function 
-void INS_APIDetect_MW_analysis(ADDRINT targetAddr, ADDRINT insaddr)
+void INS_MW_analysis(ADDRINT targetAddr, ADDRINT insaddr)
 {	
-	// *fout << "MW:" << toHex(insaddr) << "->" << toHex(targetAddr) << endl;
-	set_mwblock(targetAddr);	
-}
-
-// ========================================================================================================================
-// Memory Trace Functions 
-// ========================================================================================================================
-
-// memory trace analysis function
-void EXE_TRC_Memtrc_analysis(ADDRINT addr, THREADID threadid)
-{
-	mod_info_t *minfo = GetModuleInfo(addr);	
-	mod_info_t *prevminfo = prevmod;
-	prevmod = minfo;
-	if (minfo == NULL) return;
-	if (minfo->isDLL() && prevminfo != NULL && prevminfo->isDLL()) return;
-
-	PIN_GetLock(&lock, threadid+1);
-	if (isDebug) *fout << toHex(addr) << ' ' << "T:" << threadid << " " << GetAddrInfo(addr) << endl;
-	PIN_ReleaseLock(&lock);	
-}
-
-// memory trace instrumentation function
-void EXE_TRC_MemTrace_inst(TRACE trace, void *v)
-{
-	ADDRINT addr = TRACE_Address(trace);
-
-#if RECORDTRACE == 1
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)EXE_TRC_Memtrc_analysis,
-		IARG_ADDRINT, addr,
-		IARG_THREAD_ID,
-		IARG_END);
+#if LOG_MEMORY_WRITE == 1
+	*fout << "# MW:" << toHex(insaddr) << "->" << toHex(targetAddr) << endl;
 #endif
-
-	// skip dll module
-	mod_info_t *minfo = GetModuleInfo(addr);
-	if (minfo == NULL || minfo->isDLL()) return;
-
-	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-	{
-		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
-		{
-
-			// for efficiency exclude cmp and scasb instructions
-			if (INS_Opcode(ins) == XED_ICLASS_CMP ||
-				INS_Opcode(ins) == XED_ICLASS_SCASB ||
-				INS_Opcode(ins) == XED_ICLASS_SCASW ||
-				INS_Opcode(ins) == XED_ICLASS_SCASD) continue;
-
-			ADDRINT addr = INS_Address(ins);
-			asmcode_m[addr] = INS_Disassemble(ins);
-
-			if (INS_IsMemoryRead(ins) && !INS_IsStackRead(ins))
-			{
-				INS_InsertPredicatedCall(
-					ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_Memtrace_MR_analysis,
-					IARG_INST_PTR,
-					IARG_MEMORYREAD_SIZE,
-					IARG_MEMORYREAD_EA,
-					IARG_THREAD_ID,
-					IARG_END);
-			}
-
-			if (INS_HasMemoryRead2(ins) && !INS_IsStackRead(ins))
-			{
-				INS_InsertPredicatedCall(
-					ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_Memtrace_MR_analysis,
-					IARG_INST_PTR,
-					IARG_MEMORYREAD_SIZE,
-					IARG_MEMORYREAD2_EA,
-					IARG_THREAD_ID,
-					IARG_END);
-			}
-
-			if (INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins))
-			{
-				INS_InsertPredicatedCall(
-					ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_Memtrace_MW_analysis,
-					IARG_INST_PTR,
-					IARG_MEMORYWRITE_SIZE,
-					IARG_MEMORYWRITE_EA,
-					IARG_THREAD_ID,
-					IARG_END);
-			}
-		}
-	}
-}
-
-// memory trace memory write analysis function
-void EXE_INS_Memtrace_MW_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid)
-{
-	if (ip >= obf_rdata_saddr && ip < obf_rdata_eaddr) {
-		PIN_GetLock(&lock, threadid + 1);
-		*fout << toHex(ip) << " W:" << toHex(targetAddr) << " " << mSize << ' ' << GetAddrInfo(targetAddr) << ' ' << asmcode_m[ip] << endl;
-		PIN_ReleaseLock(&lock);
-	}	
-}
-
-// memory trace memory read analysis function
-void EXE_INS_Memtrace_MR_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid)
-{
-	if (ip >= obf_rdata_saddr && ip < obf_rdata_eaddr) {
-		PIN_GetLock(&lock, threadid + 1);
-		*fout << toHex(ip) << " R:" << toHex(targetAddr) << " " << mSize << ' ' << GetAddrInfo(targetAddr) << ' ' << asmcode_m[ip] << endl;
-		PIN_ReleaseLock(&lock);
-	}
-}
-
-
-
-// ========================================================================================================================
-// Instruction Trace Functions 
-// ========================================================================================================================
-
-// Instruction trace analysis function for executables
-void EXE_TRC_InsTrc_Analysis(ADDRINT ip, THREADID threadid)
-{
-	if (threadid != 0) return;
-	if (isInsTrcReady) {
-		mod_info_t *modinfo = GetModuleInfo(ip);
-
-		ADDRINT baseaddr = 0;
-		if (modinfo != NULL) baseaddr = modinfo->saddr;
-		for (auto it = trace_cache_m[ip]->begin(); it != trace_cache_m[ip]->end(); it++) {
-			ADDRINT addr = *it;
-			if (addr == instrc_saddr) isInsTrcOn = true;
-			if (!isInsTrcOn) continue;
-
-			if (baseaddr != 0) {
-				*fout << modinfo->name << '+' << toHex(addr - baseaddr) << ' ' << asmcode_m[addr] << endl;
-			}
-			else {
-				*fout << toHex(addr) << ' ' << asmcode_m[addr] << endl;
-			}
-							
-			if (addr == instrc_eaddr) {
-				isInsTrcReady = false;
-				isInsTrcOn = false;
-				return;
-			}
-		}	
-	}
-}
-
-// Trace instrumentation function for executable file instruction trace
-void EXE_TRC_InsTrc_Inst(TRACE trace, void *v)
-{
-	ADDRINT addr = TRACE_Address(trace);
-
-	// check approximately by memory block
-	if (addr / 0x1000 == instrc_saddr / 0x1000) isInsTrcWatchOn = true;
-	if (!isInsTrcWatchOn) return;
-
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)EXE_TRC_InsTrc_Analysis,
-		IARG_ADDRINT, addr,
-		IARG_THREAD_ID,
-		IARG_END);
-
-	trace_cache_m[addr] = new vector<ADDRINT>;
-
-	// skip dll module
-	mod_info_t *minfo = GetModuleInfo(addr);
-	
-	// if (minfo == NULL || minfo->isDLL()) return;
-
-	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-	{
-		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
-		{
-			ADDRINT insaddr = INS_Address(ins);
-			if (insaddr == instrc_saddr) isInsTrcReady = true;
-			asmcode_m[insaddr] = INS_Disassemble(ins);
-			trace_cache_m[addr]->push_back(insaddr);
-		}
-	}
+	set_mwblock(targetAddr);	
 }
 
 
@@ -882,7 +786,9 @@ void EXE_TRC_InsTrc_Inst(TRACE trace, void *v)
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 {
 	thr_cnt++;
-	if (isDebug) *dout << "Starting Thread " << threadid << endl;
+#if LOG_THREAD == 1
+	*fout << "# Starting Thread " << threadid << endl;
+#endif
 	thread_ids.insert(threadid);
 	if (threadid == 0)
 	{
@@ -894,10 +800,67 @@ VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
 VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 {
 	thr_cnt--;
-	if (isDebug) *dout << "Ending Thread " << threadid << endl;
+#if LOG_THREAD == 1
+	*fout << "# Ending Thread " << threadid << endl;
+#endif
 	thread_ids.erase(threadid);
 }
 
+
+
+// ===============
+// 
+// ===============
+
+bool CheckExportArea_x64(int step)
+{
+	bool retVal = false;
+	size_t txtsize = main_txt_eaddr - main_txt_saddr;;
+	UINT8 *buf = (UINT8*)malloc(txtsize);
+	// buf has executable memory image
+	PIN_SafeCopy(buf, (VOID*)main_txt_saddr, txtsize);
+
+	// step 1: find zero block
+	if (step == 1) {
+		bool isZeroBlk = true;
+		if (addrZeroBlk != 0) goto free_buf;
+		addrZeroBlk = 0;
+
+		for (size_t blk = 0; blk < txtsize; blk += 0x1000) {
+			isZeroBlk = true;
+			for (size_t i = 0; i < 0x1000; i++) {
+				if (buf[blk + i] != 0) {
+					isZeroBlk = false;
+					break;
+				}
+			}
+			if (isZeroBlk) {
+				addrZeroBlk = main_txt_saddr + blk;
+				retVal = true;
+				goto free_buf;
+			}
+		}
+	}
+	// step 2: check whether the zero block is filled
+	else if (step == 2) {
+		bool isZeroBlk = true;
+		if (addrZeroBlk == 0) {
+			retVal = false;
+			goto free_buf;
+		}
+		for (size_t i = 0; i < 0x1000; i++) {
+			if (buf[addrZeroBlk - main_txt_saddr + i] != 0) {
+				retVal = true;
+				goto free_buf;
+			}
+		}
+	}
+
+free_buf:
+	free(buf);
+	// *fout << toHex(addrZeroBlk) << endl;
+	return retVal;
+}
 
 
 // ========================================================================================================================
@@ -905,296 +868,105 @@ VOID ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v)
 // ========================================================================================================================
 
 // IMG instrumentation function for EXE files
-void EXE_IMG_inst(IMG img, void *v)
+void IMG_inst(IMG img, void *v)
 {
+	// Trim image name
 	string imgname = IMG_Name(img);
+	size_t pos = imgname.rfind("\\") + 1;
+	imgname = imgname.substr(pos);
 	TO_LOWER(imgname);
-	size_t pos = imgname.rfind("\\") + 1;
-	imgname = imgname.substr(pos);
-	
-	if (module_info_m.find(imgname) != module_info_m.end()) return;
 
-	string name = imgname;
-	ADDRINT saddr = IMG_LowAddress(img);
-	ADDRINT eaddr = IMG_HighAddress(img);
-
-	mod_info_t *modinfo = modinfo = new mod_info_t(name, saddr, eaddr);
-	module_info_m[name] = modinfo;
-
-	// if this image is a dll loader
-	if (isDLLAnalysis && IMG_IsMainExecutable(img))
-	{
-		// loader
-		loader_saddr = saddr;
-		loader_eaddr = eaddr;
-	}
-
-	// dll or exe to deobfuscated
-	bool is_obfuscated_img = false;
-
-	if (imgname == dll_name || !isDLLAnalysis && IMG_IsMainExecutable(img))
-	{		
-		obf_img_saddr = saddr;
-		obf_img_eaddr = eaddr;
-		obf_entry_addr = IMG_Entry(img);
-
-		// modify tracing start address according to memory loaded address of the executable file
-		if (instrc_saddr != 0) instrc_saddr += obf_img_saddr;
-		if (instrc_eaddr != 0) instrc_eaddr += obf_img_saddr;
-
-		SEC sec = IMG_SecHead(img);
-		obf_txt_saddr = SEC_Address(sec);
-		obf_txt_eaddr = obf_txt_saddr + SEC_Size(sec);
-	}
-	
-#if LOG_IMAGE_INFO == 1
-		*fout << name << '\t' << toHex(saddr) << "," << toHex(eaddr) << endl;
-#endif
-
-	for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
-	{
-		string secname = SEC_Name(sec);
-		ADDRINT saddr = SEC_Address(sec);
-		ADDRINT eaddr = saddr + SEC_Size(sec);
-		sec_info_t *secinfo = new sec_info_t(imgname, secname, saddr, eaddr);
-		modinfo->sec_infos.push_back(secinfo);		
-				
-#if LOG_SECTION_INFO == 1
-		*fout << '\t' << secname << '\t' << toHex(saddr) << "," << toHex(eaddr) << endl;
-#endif
-
-		if (SEC_Name(sec) == ".text")
-		{
-
-			if (IMG_IsMainExecutable(img))
-			{
-				obf_txt_saddr = SEC_Address(sec);
-				obf_txt_eaddr = obf_txt_saddr + SEC_Size(sec);
-			}
-
-			for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn))
-			{
-				string rtnname = RTN_Name(rtn);
-				ADDRINT saddr = RTN_Address(rtn);
-				ADDRINT eaddr = saddr + RTN_Range(rtn);
-				fn_info_t *fninfo = new fn_info_t(imgname, rtnname, saddr, eaddr);
-
-				fn_info_m[saddr] = fninfo;
-				fn_str_2_fn_info[make_pair(imgname, rtnname)] = fninfo;
-				module_info_m[imgname]->fn_infos.push_back(fninfo);
-			}
-		}
-		else if (SEC_Name(sec) == ".rdata" && IMG_IsMainExecutable(img)) {
-			obf_rdata_saddr = SEC_Address(sec);
-			obf_rdata_eaddr = obf_rdata_saddr + SEC_Size(sec);
-		}
-	}
-}
-
-// IMG instrumentation function for DLL files
-void DLL_IMG_inst(IMG img, void *v)
-{
-	string imgname = IMG_Name(img);
-	TO_LOWER(imgname);	
-	size_t pos = imgname.rfind("\\") + 1;
-	imgname = imgname.substr(pos);
-
-	ADDRINT module_addr = IMG_Entry(img);
-
-	if (imgname == dll_name)
-	{
-		obf_entry_addr = module_addr;
-		if (isDebug) *fout << "DLL Entry Address: " << toHex(obf_entry_addr) << endl;
-	}
-
-	mod_info_t *dllinfo = NULL;
-
+	mod_info_t *modinfo = NULL;
 	if (module_info_m.find(imgname) != module_info_m.end()) return;
 
 	// Record symbol information of a loaded image 
-	string name = imgname;
 	ADDRINT saddr = IMG_LowAddress(img);
 	ADDRINT eaddr = IMG_HighAddress(img);
+	modinfo = new mod_info_t(imgname, saddr, eaddr);
+	module_info_m[imgname] = modinfo;
 
-	if (IMG_IsMainExecutable(img))
+	*fout << "IMG:" << *modinfo << endl;
+
+	if (isDLLAnalysis)
 	{
-		loader_saddr = saddr;
-		loader_eaddr = eaddr;
+		// obfuscated dll module is loaded
+		if (imgname == obf_dll_name)
+		{
+			obf_dll_entry_addr = IMG_Entry(img);
+			main_img_saddr = saddr;
+			main_img_eaddr = eaddr;
+
+			SEC sec = IMG_SecHead(img);
+			main_txt_saddr = SEC_Address(sec);
+			main_txt_eaddr = main_txt_saddr + SEC_Size(sec);
+		}
+
+		// loader exe file is loaded
+		if (IMG_IsMainExecutable(img))
+		{
+			loader_saddr = saddr;
+			loader_eaddr = eaddr;
+		}
+#ifdef TARGET_IA32E
+		// for 64 bit application check IAT candidate first
+		if (IMG_IsMainExecutable(img) || imgname == obf_dll_name)
+		{
+			CheckExportArea_x64(1);
+		}
+#endif
+	}
+	else
+	{
+		// EXE analysis
+		if (IMG_IsMainExecutable(img))
+		{
+			main_img_saddr = saddr;
+			main_img_eaddr = eaddr;
+
+			// *fout << toHex(instrc_saddr) << ' ' << toHex(instrc_eaddr) << endl;
+			SEC sec = IMG_SecHead(img);
+			main_txt_saddr = SEC_Address(sec);
+			main_txt_eaddr = main_txt_saddr + SEC_Size(sec);
+
+#ifdef TARGET_IA32E
+			// for 64 bit application check IAT candidate first
+			CheckExportArea_x64(1);
+#endif
+		}
 	}
 
-	if (imgname == dll_name)
-	{
-		obf_img_saddr = saddr;
-		obf_img_eaddr = eaddr;
-
-		// modify tracing start address according to memory loaded address of the executable file
-		if (instrc_saddr != 0) instrc_saddr += obf_img_saddr;
-		if (instrc_eaddr != 0) instrc_eaddr += obf_img_saddr;
-
-	}
-
-	dllinfo = new mod_info_t(name, saddr, eaddr);
-	module_info_m[name] = dllinfo;
-
-	if (isDebug) *fout << "Module: " << *dllinfo << endl;
-	
-	for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec))
+	// Record each section and function data
+	size_t cnt = 0;
+	for (SEC sec = IMG_SecHead(img); SEC_Valid(sec); sec = SEC_Next(sec), cnt++)
 	{
 		string secname = SEC_Name(sec);
 		ADDRINT saddr = SEC_Address(sec);
 		ADDRINT eaddr = saddr + SEC_Size(sec);
 		sec_info_t *secinfo = new sec_info_t(imgname, secname, saddr, eaddr);
-		dllinfo->sec_infos.push_back(secinfo);
-		if (isDebug) *fout << "    Section: " << *secinfo << endl;
+		modinfo->sec_infos.push_back(secinfo);
+		
+		*fout << "SECTION:" << *secinfo << endl;
 
-		if (SEC_Name(sec) == ".text")
+		if (SEC_Name(sec) == ".text" || cnt == 0)
 		{
-			if (imgname == dll_name)
-			{
-				obf_txt_saddr = SEC_Address(sec);
-				obf_txt_eaddr = obf_txt_saddr + SEC_Size(sec);
-			}
-
 			for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn))
 			{
 				string rtnname = RTN_Name(rtn);
 				ADDRINT saddr = RTN_Address(rtn);
 				ADDRINT eaddr = saddr + RTN_Range(rtn);
 				fn_info_t *fninfo = new fn_info_t(imgname, rtnname, saddr, eaddr);
+
 				fn_info_m[saddr] = fninfo;
 				fn_str_2_fn_info[make_pair(imgname, rtnname)] = fninfo;
 				module_info_m[imgname]->fn_infos.push_back(fninfo);
 			}
 		}
-		else if (SEC_Name(sec) == ".rdata" && imgname == dll_name) {
+		else if (SEC_Name(sec) == ".rdata" && (!isDLLAnalysis && IMG_IsMainExecutable(img) || isDLLAnalysis && imgname == obf_dll_name)) {
 			obf_rdata_saddr = SEC_Address(sec);
 			obf_rdata_eaddr = obf_rdata_saddr + SEC_Size(sec);
 		}
-
 	}
 }
-
-// ========================================================================================================================
-// DLL Instrumentation
-// ========================================================================================================================
-
-// TRACE instrumentation function for DLL files
-void DLL_TRC_APIDetectinst(TRACE trace, void *v)
-{
-	ADDRINT addr = TRACE_Address(trace);
-	
-	// *fout << toHex(addr) << endl;
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)TRC_APIDetect_analysis,
-		IARG_CONTEXT,
-		IARG_ADDRINT, addr,
-		IARG_UINT32, TRACE_Size(trace), 
-		IARG_THREAD_ID,
-		IARG_END);
-
-	if (addr == obf_entry_addr) {
-		is_unpack_started = true;
-		LOG("unpack started");
-	}
-
-	if (is_unpack_started && addr >= loader_saddr && addr < loader_eaddr)
-	{
-		LOG("unpack ended");
-		FindAPICalls();
-		isCheckAPIStart = true;
-	}
-}
-
-//////////////////////////////////////////////////////////
-// OEP Detect Function
-//////////////////////////////////////////////////////////
-void EXE_TRC_OEPDetect_inst(TRACE trace, void *v) {
-	ADDRINT addr = TRACE_Address(trace);
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)EXE_TRC_OEPDetect_analysis,
-		IARG_ADDRINT, addr,
-		IARG_THREAD_ID,
-		IARG_END);
-
-	// instrument each memory write instruction
-	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-	{
-		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
-		{
-			// if (INS_Mnemonic(ins) == "XRSTOR") continue;
-
-			if (INS_IsMemoryWrite(ins) && !INS_IsStackWrite(ins))
-			{
-				INS_InsertPredicatedCall(
-					ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_OEPDetect_MW_analysis,
-					IARG_CONTEXT,
-					IARG_INST_PTR,
-					IARG_UINT32, INS_Address(ins) + INS_Size(ins),
-					IARG_MEMORYWRITE_SIZE,
-					IARG_MEMORYWRITE_EA,
-					IARG_THREAD_ID,
-					IARG_END);
-			}
-		}
-	}
-
-	if (addr >= obf_txt_saddr && addr < obf_txt_eaddr)
-	{
-		// find OEP and then near OEP
-		// Debugger stops when HWBP is set on OEP
-		// but HWBP on near OEP works well
-		if (oep == 0) {
-			set_meblock(addr);
-			if (get_mwblock(addr) && get_meblock(addr) == 1)
-			{
-				oep = addr;
-				*fout << "OEP:" << toHex(oep - obf_img_saddr) << endl;
-			}
-		}
-		// near OEP is the address of the first call instruction 
-		else {
-			for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl)) {
-				for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins)) {
-					ADDRINT taddr = INS_Address(ins);
-					if (taddr < obf_txt_saddr || taddr > obf_txt_eaddr) continue;
-					if (INS_IsCall(ins)) {
-						// oep = INS_Address(ins);
-						oep = BBL_Address(bbl);
-						*fout << "NEAR OEP:" << toHex(oep - obf_img_saddr) << endl;
-						((ofstream*)fout)->close();
-						if (debugger_attach_wait_time) isDetach = true;
-						else PIN_ExitProcess(-1);
-						return;
-					}
-				}
-			}
-		}
-		return;
-	}
-
-}
-
-void EXE_TRC_OEPDetect_analysis(ADDRINT addr, THREADID threadid) {
-	if (threadid != 0) return;
-
-	if (threadid == 0)
-	{
-		fn_info_t *info1 = GetFunctionInfo(addr);
-		fn_info_t *info2 = GetFunctionInfo(prevaddr);
-		if (info1 != NULL && info2 != NULL &&
-			prevaddr >= obf_img_saddr && prevaddr < obf_img_eaddr &&
-			(addr > obf_img_eaddr || addr < obf_img_saddr))
-		{
-			*fout << "call : " << info1->name << endl;
-		}
-
-	}
-	prevaddr = addr;
-}
-
-
-void EXE_INS_OEPDetect_MW_analysis(CONTEXT *ctxt, ADDRINT ip, ADDRINT nextip, size_t mSize, ADDRINT targetAddr, THREADID threadid) {
-	set_mwblock(targetAddr);
-}
-
 
 
 /*!
@@ -1231,77 +1003,41 @@ int main(int argc, char *argv[])
 	xed_tables_init();
 
 	string outputFileName = KnobOutputFile.Value();	
-	//if (outputFileName == "result.txt")
-	//{		
-	//	outputFileName = string(argv[argc - 1]);
-	//	outputFileName += ".txt";
-	//}	
-	
+	if (outputFileName == "result.txt")
+	{		
+		outputFileName = string(argv[argc - 1]) + ".txt";	
+	}		
 	fout = new ofstream(outputFileName.c_str());	
 
-	isMemTrace = KnobMemoryTrace.Value();
-	isAPIDetect = KnobAPIDetect.Value();
-	isOEPDetect = KnobOEPDetect.Value();
-
-	string debugFileName = KnobDebug.Value();	    
-	dout = new ofstream(debugFileName.c_str());
-
-	if (debugFileName != "") isDebug = true;
-
-	dll_name = KnobDLLFile.Value();
-	if (dll_name != "") {
+	obf_dll_name = KnobDLLFile.Value();
+	if (obf_dll_name != "") {
 		isDLLAnalysis = true;
 
 		*fout << "TYPE:DLL" << endl;
-		*fout << "NAME:" << dll_name << endl;
+		*fout << "NAME:" << obf_dll_name << endl;
 
-		TO_LOWER(dll_name);
-		size_t pos = dll_name.rfind("\\");	
-		if (pos != string::npos) dll_name = dll_name.substr(pos + 1);
-		
+		TO_LOWER(obf_dll_name);
+		size_t pos = obf_dll_name.rfind("\\");	
+		if (pos != string::npos) obf_dll_name = obf_dll_name.substr(pos + 1);		
 	}
 	else {		
 		*fout << "TYPE:EXE" << endl;
+		*fout << "NAME:" << string(argv[argc - 1]) << endl;
 	}
 
-	debugger_attach_wait_time = KnobAttachDebugger.Value() * 1000;
+	isDirectCall = KnobDirectCall.Value();
 	
-	instrc_saddr = AddrintFromString(KnobTraceStartAddr.Value());
-	// *fout << toHex(instrc_saddr) << endl;
-	instrc_eaddr = AddrintFromString(KnobTraceEndAddr.Value());
-
 	PIN_InitSymbols();
 
 	// Register Analysis routines to be called when a thread begins/ends
 	PIN_AddThreadStartFunction(ThreadStart, 0);
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
 
+	// Image Instrumentation
+	IMG_AddInstrumentFunction(IMG_inst, 0);
+
 	// Register function to be called to instrument traces
-	IMG_AddInstrumentFunction(EXE_IMG_inst, 0);
-	if (isDLLAnalysis) {
-		if (isAPIDetect) TRACE_AddInstrumentFunction(DLL_TRC_APIDetectinst, 0);			
-		if (instrc_saddr != 0) TRACE_AddInstrumentFunction(EXE_TRC_InsTrc_Inst, 0);
-
-		// IMG_AddInstrumentFunction(DLL_IMG_inst, 0);
-	}
-	else {
-
-		if (isMemTrace) TRACE_AddInstrumentFunction(EXE_TRC_MemTrace_inst, 0);
-
-		if (isAPIDetect) {
-			TRACE_AddInstrumentFunction(EXE_TRC_APIDetect_inst, 0);
-		}
-
-		if (isOEPDetect) {
-			TRACE_AddInstrumentFunction(EXE_TRC_OEPDetect_inst, 0);
-		}
-
-		if (instrc_saddr != 0) {
-			TRACE_AddInstrumentFunction(EXE_TRC_InsTrc_Inst, 0);
-		}
-
-		// IMG_AddInstrumentFunction(EXE_IMG_inst, 0);
-	}
+	TRACE_AddInstrumentFunction(TRC_inst, 0);
 
 	// Register function to be called when the application exits
 	PIN_AddFiniFunction(Fini, 0);

@@ -7,13 +7,16 @@
 #include "PinSymbolInfoUtil.h"
 
 // obfuscated module information
-ADDRINT obf_img_saddr = 0;	// section start address where eip is changed into 
-ADDRINT obf_img_eaddr = 0;
-ADDRINT obf_txt_saddr = 0;	// section start address where eip is changed into 
-ADDRINT obf_txt_eaddr = 0;
+ADDRINT main_img_saddr = 0;	// section start address where eip is changed into 
+ADDRINT main_img_eaddr = 0;
+ADDRINT main_txt_saddr = 0;	// section start address where eip is changed into 
+ADDRINT main_txt_eaddr = 0;
 
 ADDRINT obf_rdata_saddr = 0;	// section start address after .text section
 ADDRINT obf_rdata_eaddr = 0;	
+
+ADDRINT obf_idata_saddr = 0;	// idata start
+ADDRINT obf_idata_eaddr = 0;	// idata end
 
 ADDRINT oep = 0;	// oep of VMProtect unpacked executable
 
@@ -21,24 +24,26 @@ ADDRINT oep = 0;	// oep of VMProtect unpacked executable
 // Global variables 
 /* ================================================================== */
 
-bool isDetach = false;
-
 // thread count
 size_t thr_cnt;
 set<size_t> thread_ids;
 PIN_THREAD_UID mainThreadUid;
 
+// direct call
+bool isDirectCall = false;
 
-// ===============
-// for debugging
-// ===============
+// code cache
 map<ADDRINT, string> asmcode_m;
 map<ADDRINT, vector<ADDRINT>*> trace_cache_m;
 map<ADDRINT, ADDRINT> trace_next_addr_m;
-UINT8 memory_buffer[1024*1024];	// code cache buffer size is 1MB
+UINT8 memory_buffer[1024*1024 * 100];	// code cache buffer size is 100MB
 
 
-ADDRINT obf_entry_addr;	// VMProtect dll entry address
+/////////////////////////////////////////////////////////////////
+// structure information
+/////////////////////////////////////////////////////////////////
+
+ADDRINT obf_dll_entry_addr;	// VMProtect dll entry address
 
 // dll loader information for obfuscated dll analysis
 ADDRINT loader_saddr = 0;
@@ -53,31 +58,13 @@ int obfCallLevel = 0;	// flag for recording 1-level obfuscated call instructions
 mod_info_t *prevmod;	// previous module
 
 // KNOB related flags
-bool isMemTrace = false;
-bool isAPIDetect = false;
 bool isDLLAnalysis = false;
-bool isOEPDetect = false;
-bool isDebug = false;
 
 // obfuscated DLL name
-string dll_name = "";
+string obf_dll_name = "";
 
 // standard output & file output 
 ostream * fout = &cerr;	// result output
-ostream * dout = NULL;	// result output
-
-// number of seconds to wait until a debugger to attach at OEP
-UINT32 debugger_attach_wait_time = 0;
-
-// instruction trace start and end addresses
-ADDRINT instrc_saddr = 0;
-ADDRINT instrc_eaddr = 0;
-bool isInsTrcWatchOn = false;
-bool isInsTrcReady = false;
-bool isInsTrcOn = false;
-
-// anti-attach write addresses
-set<ADDRINT> anti_attach_address_set;
 
 // lock serializes access to the output file.
 PIN_LOCK lock;
@@ -98,6 +85,10 @@ fn_info_t *current_obf_fn = NULL;
 // map from obfuscated function into original function
 map<ADDRINT, fn_info_t*> obfaddr2fn;
 
+// map from obfuscated function into original function of 'mov esi, api' obfuscation
+map<ADDRINT, fn_info_t*> mov_obfaddr2fn;
+
+
 // map from obfuscated address to original address in IAT
 map<ADDRINT, ADDRINT> iataddr2obffnaddr;
 
@@ -116,8 +107,10 @@ vector<call_info_t*> obfuscated_call_candidate_addrs;
 
 
 // flags for current status 
+bool isRegSaved = false;
 bool isCheckAPIStart = false;
 bool isCheckAPIRunning = false;
+bool isFoundAPICalls = false;
 size_t current_obf_fn_pos = 0;
 
 vector<ADDRINT> traceAddrSeq;
@@ -134,8 +127,9 @@ bool isCheckAPIEnd = false;
 // current obfuscated function address for x64
 ADDRINT current_obf_fn_addr;
 
-// 64bit export block candidate
+// export block candidate
 ADDRINT addrZeroBlk = 0;
+vector<ADDRINT> function_slots_in_rdata;
 
 
 #define MakeDWORD(buf) (buf[3] | (buf[2] << 8) | (buf[1] << 16) | (buf[0] << 24))
@@ -165,9 +159,12 @@ ADDRINT toADDRINT1(UINT8 *buf) {
 // registers used for obfuscation
 #ifdef TARGET_IA32
 REG regs_for_obfuscation[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI };
+REG regs_ctx[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI, REG_ESP, REG_EBP };
 #elif TARGET_IA32E
 REG regs_for_obfuscation[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI };
+REG regs_ctx[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI, REG_RSP, REG_RBP };
 #endif	
+map<REG, ADDRINT> regs_saved;
 
 
 void clear_mwblocks();
@@ -180,24 +177,15 @@ size_t get_meblock(ADDRINT addr);
 
 void FindAPICalls();
 bool FindGap();
-void EXE_IMG_inst(IMG img, void *v);
-void DLL_IMG_inst(IMG img, void *v);
+void IMG_inst(IMG img, void *v);
 void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
 void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
-void EXE_TRC_Memtrc_analysis(ADDRINT addr, THREADID threadid);
-void EXE_TRC_inst(TRACE trace, void *v);
-void DLL_TRC_APIDetectinst(TRACE trace, void *v);
-void EXE_INS_Memtrace_MW_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-void EXE_INS_Memtrace_MR_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
 
-void EXE_TRC_OEPDetect_inst(TRACE trace, void *v);
-void EXE_TRC_OEPDetect_analysis(ADDRINT addr, THREADID threadid);
-void EXE_INS_OEPDetect_MW_analysis(CONTEXT *ctxt, ADDRINT ip, ADDRINT nextip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-
-void EXE_TRC_APIDetect_inst(TRACE trace, void *v);
-void TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid);
+void TRC_inst(TRACE trace, void *v);
+void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid);
+void INS_MW_analysis(ADDRINT targetAddr, ADDRINT insaddr);
+void save_regs(LEVEL_VM::CONTEXT * ctxt);
 void restore_regs(LEVEL_VM::CONTEXT * ctxt);
 REG check_api_fn_assignment_to_register(LEVEL_VM::CONTEXT * ctxt);
 REG check_reg_call_ins(std::string &disasm);
 bool check_abnormal_ins(std::string &disasm);
-void INS_APIDetect_MW_analysis(ADDRINT targetAddr, ADDRINT insaddr);

@@ -7,17 +7,23 @@
 #include "PinSymbolInfoUtil.h"
 
 // obfuscated module information
-ADDRINT obf_img_saddr = 0;	// section start address where eip is changed into 
-ADDRINT obf_img_eaddr = 0;
-ADDRINT obf_txt_saddr = 0;	// section start address where eip is changed into 
-ADDRINT obf_txt_eaddr = 0;
+ADDRINT main_img_saddr = 0;	// section start address where eip is changed into 
+ADDRINT main_img_eaddr = 0;
+ADDRINT main_txt_saddr = 0;	// section start address where eip is changed into 
+ADDRINT main_txt_eaddr = 0;
+
+ADDRINT obf_rdata_saddr = 0;	// section start address after .text section
+ADDRINT obf_rdata_eaddr = 0;	// Added to keep compatibility with VMP deobfuscator
+
+ADDRINT obf_idata_saddr = 0;	// idata start
+ADDRINT obf_idata_eaddr = 0;	// idata end
+
+
 ADDRINT oep = 0;	// oep of themida unpacked executable
 
 /* ================================================================== */
 // Global variables 
 /* ================================================================== */
-
-bool isDetach = false;
 
 // thread control
 size_t thr_cnt;
@@ -30,8 +36,11 @@ PIN_THREAD_UID mainThreadUid;
 map<ADDRINT, string> asmcode_m;
 map<ADDRINT, vector<ADDRINT>*> trace_cache_m;
 
+// Buffer
+UINT8 memory_buffer[1024 * 1024 * 100];	// code cache buffer size is 100MB
 
-ADDRINT obf_entry_addr;	// themida dll entry address
+
+ADDRINT obf_dll_entry_addr;	// themida dll entry address
 
 // dll loader information for obfuscated dll analysis
 ADDRINT loader_saddr = 0;
@@ -45,32 +54,25 @@ int obfCallLevel = 0;	// flag for recording 1-level obfuscated call instructions
 
 mod_info_t *prevmod;	// previous module
 
+/////////////////////////////////////////////////////////////////
 // KNOB related flags
-bool isMemTrace = false;
-bool isAPIDetect = false;
 bool isDLLAnalysis = false;
-bool isOEPDetect = false;
-bool isDebug = false;
+string packer_type = "themida";
 
 // obfuscated DLL name
-string dll_name = "";
+string obf_dll_name = "";
 
 // standard output & file output 
 ostream * fout = &cerr;	// result output
-ostream * dout = NULL;	// result output
 
-// number of seconds to wait until a debugger to attach at OEP
-UINT32 debugger_attach_wait_time = 0;
+// memory dump
+bool isMemDump = false;
 
-// instruction trace start and end addresses
-ADDRINT instrc_saddr = 0;
-ADDRINT instrc_eaddr = 0;
-bool isInsTrcWatchOn = false;
-bool isInsTrcReady = false;
-bool isInsTrcOn = false;
+// direct call
+bool isDirectCall = false;
 
-// anti-attach write addresses
-set<ADDRINT> anti_attach_address_set;
+/////////////////////////////////////////////////////////////////
+
 
 // lock serializes access to the output file.
 PIN_LOCK lock;
@@ -91,8 +93,11 @@ fn_info_t *current_obf_fn = NULL;
 // map from obfuscated function into original function
 map<ADDRINT, fn_info_t*> obfaddr2fn;
 
+// map from obfuscated function into original function of 'mov esi, api' obfuscation
+map<ADDRINT, fn_info_t*> mov_obfaddr2fn;
+
 // map from obfuscated address to original address in IAT
-map<ADDRINT, ADDRINT> iataddr2obffnaddr;
+map<ADDRINT, ADDRINT> addr2fnaddr;
 
 // obfuscated call instruction address and target address
 vector<pair<ADDRINT, ADDRINT>> obf_call_addrs;
@@ -145,39 +150,31 @@ size_t get_mwblock(ADDRINT addr);
 bool set_meblock(ADDRINT addr);
 size_t get_meblock(ADDRINT addr);
 
-void EXE64_FindAPICalls();
-bool EXE64_CheckExportArea(int step);
-void EXE64_CheckExportFunctions();
-void EXE64_TRC_APIDetect_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
-void EXE64_INS_APIDetect_MW_analysis(ADDRINT targetAddr);
-void EXE64_TRC_APIDetect_inst(TRACE trace, void *v);
+void dump_memory();
 
-void CheckExportFunctions();
-void EXE_IMG_inst(IMG img, void *v);
-void DLL_IMG_inst(IMG img, void *v);
 void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
 void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
-void EXE_TRC_Memtrc_analysis(ADDRINT addr, THREADID threadid);
-void DLL_TRC_analysis(ADDRINT addr, THREADID threadid);
-void EXE_TRC_inst(TRACE trace, void *v);
+
+void FindAPICalls_x64();
+bool CheckExportArea_x64(int step);
+
+void CheckExportFunctions_x64();
+void CheckExportFunctions_x86();
+
+void TRC_analysis_x64(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+void INS_MW_analysis_x64(ADDRINT targetAddr);
+void TRC_inst_x64(TRACE trace, void *v);
+
+void IMG_inst(IMG img, void *v);
+
 void DLL_TRC_inst(TRACE trace, void *v);
-void EXE_INS_Memtrace_MW_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-void EXE_INS_Memtrace_MR_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
 void DLL_INS_inst(INS ins, void *v);
 
 void DLL64_TRC_inst(TRACE trace, void *v);
 void DLL64_TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
 void DLL64_FixIAT();
 
-void EXE_TRC_OEPDetect_inst(TRACE trace, void *v);
-void EXE_TRC_OEPDetect_analysis(ADDRINT addr, THREADID threadid);
-void EXE_INS_OEPDetect_MW_analysis(CONTEXT *ctxt, ADDRINT ip, ADDRINT nextip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-
-
-void EXE_TRC_APIDetect_inst(TRACE trace, void *v);
-void EXE_TRC_APIDetect_analysis(ADDRINT addr, THREADID threadid);
-void EXE_INS_APIDetect_MW_analysis(CONTEXT *ctxt, ADDRINT ip, ADDRINT nextip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-void EXE_INS_APIDetect_MR_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-void DLL_INS_APIDetect_MW_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-void DLL_INS_APIDetect_MR_analysis(ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid);
-
+void INS_inst(INS ins, void *v);
+void INS_analysis(ADDRINT addr, THREADID threadid);
+void INS_MW_analysis(size_t mSize, ADDRINT targetAddr);
+void INS_MR_analysis(ADDRINT targetAddr);

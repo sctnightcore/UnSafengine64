@@ -2,6 +2,7 @@
 // 2015.04.25. 
 // seogu.choi@gmail.com
 
+#include "Config.h"
 #include "pin.H"
 #include "StrUtil.h"
 #include "PinSymbolInfoUtil.h"
@@ -13,9 +14,12 @@
 #include <sstream>
 
 // KNOB related flags
-bool isMemTrace = false;
+string isMemTrace = "";
+bool isMemReadTrace = false;
+bool isMemWriteTrace = false;
 bool isInsTrace = false;
 bool isDumpCode = false;
+bool isRegMemMap = false;
 
 // lock serializes access to the output file.
 PIN_LOCK lock;
@@ -36,10 +40,10 @@ char cbuf[256];	// character buffer
 
 
 // obfuscated module information
-ADDRINT obf_img_saddr = 0;	// section start address where EIP is changed into 
-ADDRINT obf_img_eaddr = 0;
-ADDRINT obf_txt_saddr = 0;	// section start address where EIP is changed into 
-ADDRINT obf_txt_eaddr = 0;
+ADDRINT main_img_saddr = 0;	// section start address where EIP is changed into 
+ADDRINT main_img_eaddr = 0;
+ADDRINT main_txt_saddr = 0;	// section start address where EIP is changed into 
+ADDRINT main_txt_eaddr = 0;
 
 // instruction trace start and end addresses
 ADDRINT instrc_saddr = 0;
@@ -50,6 +54,26 @@ bool isInsTrcReady = false;
 bool isInsTrcOn = false;
 int analysis_step = 0;
 
+// registers used for obfuscation
+#ifdef TARGET_IA32
+REG pin_regs[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI, REG_EBP, REG_ESP };
+#elif TARGET_IA32E
+REG pin_regs[] = { 
+	REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI, REG_RBP, REG_RSP, 
+	REG_R8, REG_R9, REG_R10, REG_R11, REG_R12, REG_R13, REG_R14, REG_R15};
+#endif	
+
+// special values to find register-memory mapping
+ADDRINT special_values[] = {
+	0xAAAAAADD, 0xBAAAAAAD, 0xCAAAAAFE, 0xDEAAAAAD,	0xEEEEEE66, 0xF000000D,
+	0xADD12345, 0xBAADBABE, 0xCAFEBABE, 0xDEADBEEF, 0xE664F00D, 0xF00DCAFE 
+};
+
+map<REG, ADDRINT> reg_2_special_value;
+map<ADDRINT, REG> special_value_2_reg;
+
+// VM information
+ADDRINT vmenter_addr = 0;
 
 // handler table information
 map<ADDRINT, ADDRINT> hdl_addr_m;
@@ -57,6 +81,7 @@ map<ADDRINT, ADDRINT> rev_hdl_addr_m;
 
 // tracing helper
 mod_info_t *prevmod;
+sec_info_t *prevsec;
 ADDRINT prevaddr;	// previous trace address
 
 // region info 
@@ -77,8 +102,17 @@ void EXE_INS_Memtrace_MW_after_analysis(CONTEXT *ctxt, size_t mSize, THREADID th
 void EXE_INS_Memtrace_MR_analysis(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid, BOOL is_stack);
 
 // Instruction Trace Instrumentation
-void EXE_Trace_Trc_ana(ADDRINT ip, THREADID threadid);
 void EXE_TRC_InsTrc_Inst(TRACE trace, void *v);
+
+// Register Memory Mapping Instrumentation
+void EXE_Trc_RegMemMap_Ins(TRACE trc, void *v);
+void EXE_Trc_RegMemMap_Ana(ADDRINT ip, THREADID threadid);
+void EXE_INS_RegMemMap_vmenter_Ana(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+void EXE_INS_RegMemMap_before_Ana(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid, BOOL is_stack);
+void EXE_INS_RegMemMap_after_Ana(CONTEXT *ctxt, size_t mSize, THREADID threadid, BOOL is_stack);
+void dump_registers(CONTEXT *ctxt, THREADID tid);
+
+int main(int argc, char * argv[]);
 
 
 ADDRINT toADDRINT(UINT8 *buf) {
