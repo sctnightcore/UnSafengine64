@@ -7,6 +7,7 @@
 #include "StrUtil.h"
 #include <sstream>
 
+
 // output operators
 std::ostream& operator<<(std::ostream &strm, const fn_info_t &a) {
 	return strm << a.module_name << ":" << a.name << "[" << toHex(a.saddr) << "," << toHex(a.eaddr) << "]";
@@ -221,3 +222,42 @@ bool check_ins_valid(ADDRINT addr)
 	return false;
 }
 
+bool mod_info_t::operator==(const mod_info_t &m) const
+{
+	return saddr == m.saddr;
+}
+
+bool sec_info_t::operator==(const sec_info_t &s) const
+{
+	return s.saddr == saddr;
+}
+
+bool reg_info_t::operator==(const reg_info_t &r) const
+{
+	return r.addr == addr;
+}
+
+bool fn_info_t::operator==(const fn_info_t &f) const
+{
+	return f.saddr == saddr;
+}
+
+bool mod_info_t::operator!=(const mod_info_t &m) const
+{
+	return saddr != m.saddr;
+}
+
+bool sec_info_t::operator!=(const sec_info_t &s) const
+{
+	return s.saddr != saddr;
+}
+
+bool reg_info_t::operator!=(const reg_info_t &r) const
+{
+	return r.addr != addr;
+}
+
+bool fn_info_t::operator!=(const fn_info_t &f) const
+{
+	return f.saddr != saddr;
+}

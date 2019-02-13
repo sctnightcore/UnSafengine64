@@ -10,9 +10,7 @@ using namespace std;
 // Command line switches
 /* ===================================================================== */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "result.txt", "specify file name for the result");
-//KNOB<bool> KnobMemoryTrace(KNOB_MODE_WRITEONCE, "pintool", "mem", "1", "specify whether to record memory trace or not");
-KNOB<string> KnobMemoryTrace(KNOB_MODE_WRITEONCE, "pintool", "mem", "rw", "specify whether to trace memory read(r), write(w), read/write(rw)");
-//KNOB<bool> KnobInstructionTrace(KNOB_MODE_WRITEONCE, "pintool", "ins", "1", "instruction trace");
+KNOB<string> KnobMemoryTrace(KNOB_MODE_WRITEONCE, "pintool", "mem", "", "specify whether to trace memory read(r), write(w), read/write(rw)");
 KNOB<bool> KnobInstructionTrace(KNOB_MODE_WRITEONCE, "pintool", "ins", "0", "instruction trace");
 KNOB<string> KnobTraceStartAddr(KNOB_MODE_WRITEONCE, "pintool", "saddr", "0", "instruction trace start address");
 KNOB<string> KnobTraceEndAddr(KNOB_MODE_WRITEONCE, "pintool", "eaddr", "0", "instruction trace end address");
@@ -162,9 +160,9 @@ void EXE_INS_Memtrace_MW_analysis(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRI
 
 		ADDRINT base_addr = PIN_GetContextReg(ctxt, op1reg);
 		if (base_addr == main_img_saddr) {
-			// UINT8 buf[sizeof(ADDRINT)];
-			PIN_SafeCopy(buf, (VOID*)targetAddr, sizeof(ADDRINT));
-			ADDRINT haddr = toADDRINT(buf);
+			// UINT8 buf[ADDRSIZE];
+			PIN_SafeCopy(buf, (VOID*)targetAddr, ADDRSIZE);
+			ADDRINT haddr = BYTES_TO_ADDRINT(buf);
 			hdl_addr_m[targetAddr] = haddr + base_addr;
 			rev_hdl_addr_m[haddr + base_addr] = targetAddr;
 			// delayed_msg = "HDL";
@@ -188,7 +186,7 @@ void EXE_INS_Memtrace_MW_after_analysis(CONTEXT *ctxt, size_t mSize, THREADID th
 	if (is_stack && (mem_write_addr < main_img_saddr || mem_write_addr >= main_img_eaddr)) return;
 
 	string msg = "";
-	// UINT8 buf[sizeof(ADDRINT)];
+	// UINT8 buf[ADDRSIZE];
 	PIN_SafeCopy(buf, (VOID*)mem_write_addr, mSize);
 	ADDRINT mem_value = buf2val(buf, mSize);		
 	ADDRINT ebp_val = PIN_GetContextReg(ctxt, REG_EBP);
@@ -221,7 +219,7 @@ void EXE_INS_Memtrace_MR_analysis(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRI
 	//	// msg += " EBP:" + toHex(PIN_GetContextReg(ctxt, REG_STACK_PTR));
 	//}
 
-	// UINT8 buf[sizeof(ADDRINT)];	
+	// UINT8 buf[ADDRSIZE];	
 
 	PIN_SafeCopy(buf, (VOID*)targetAddr, mSize);
 	ADDRINT mem_value = buf2val(buf, mSize);
@@ -324,20 +322,20 @@ void EXE_Trc_ins(TRACE trc, void *v)
 		IARG_THREAD_ID,
 		IARG_END);
 
-	if (addr == 0x4017ed) {
-		for (BBL bbl = TRACE_BblHead(trc); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-		{
-			for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
-			{
-				ADDRINT insaddr = INS_Address(ins);
-				*fout << "Checking address " << toHex(insaddr) << endl;
-				if (insaddr == 0x4017f0) {
-					*fout << "Altering normal control flow" << endl;
-					INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)EXE_IPChange_ana, IARG_CONTEXT, IARG_ADDRINT, 0x401806, IARG_END);
-				}
-			}
-		}
-	}
+	//if (addr == 0x4017ed) {
+	//	for (BBL bbl = TRACE_BblHead(trc); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+	//	{
+	//		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+	//		{
+	//			ADDRINT insaddr = INS_Address(ins);
+	//			*fout << "Checking address " << toHex(insaddr) << endl;
+	//			if (insaddr == 0x4017f0) {
+	//				*fout << "Altering normal control flow" << endl;
+	//				INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)EXE_IPChange_ana, IARG_CONTEXT, IARG_ADDRINT, 0x401806, IARG_END);
+	//			}
+	//		}
+	//	}
+	//}
 
 	// check exit condition
 	if (instrc_eaddr >= addr && instrc_eaddr < addr + TRACE_Size(trc)) {
@@ -353,23 +351,23 @@ void EXE_Trc_ins(TRACE trc, void *v)
 		}
 	}
 
-	// check whether the instruction trace start address is contained in this trace
-	if (instrc_saddr >= addr && instrc_saddr < addr + TRACE_Size(trc)) {
-		*fout << "Tracing Start" << endl;
-		for (BBL bbl = TRACE_BblHead(trc); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-		{
-			for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
-			{
-				ADDRINT insaddr = INS_Address(ins);
-				*fout << "Checking address " << toHex(insaddr) << endl;
-				if (insaddr == 0x4017f0) {
-					*fout << "Altering normal control flow" << endl;
-					INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)EXE_IPChange_ana, IARG_CONTEXT, IARG_ADDRINT, 0x401806, IARG_END);
-				}
-			}
-		}
-		isInsTrcReady = true;
-	}
+	//// check whether the instruction trace start address is contained in this trace
+	//if (instrc_saddr >= addr && instrc_saddr < addr + TRACE_Size(trc)) {
+	//	*fout << "Tracing Start" << endl;
+	//	for (BBL bbl = TRACE_BblHead(trc); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+	//	{
+	//		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+	//		{
+	//			ADDRINT insaddr = INS_Address(ins);
+	//			*fout << "Checking address " << toHex(insaddr) << endl;
+	//			if (insaddr == 0x4017f0) {
+	//				*fout << "Altering normal control flow" << endl;
+	//				INS_InsertCall(ins, IPOINT_AFTER, (AFUNPTR)EXE_IPChange_ana, IARG_CONTEXT, IARG_ADDRINT, 0x401806, IARG_END);
+	//			}
+	//		}
+	//	}
+	//	isInsTrcReady = true;
+	//}
 
 	if (!isInsTrcReady) return;
 
@@ -444,13 +442,23 @@ void EXE_TRC_InsTrc_Inst(TRACE trc, void *v)
 {
 	ADDRINT addr = TRACE_Address(trc);
 	
-	// trace only main image
-	if (addr < main_img_saddr || addr >= main_img_eaddr) return;
-	
-	// skip dll module
 	mod_info_t *minfo = GetModuleInfo(addr);
-	if (minfo->isDLL()) return;
+	fn_info_t* fn_info = GetFunctionInfo(addr);
+	if (prev_fn_info == NULL && fn_info != NULL ||
+		prev_fn_info != NULL && fn_info != NULL && *prev_fn_info == *fn_info) {
+		*fout << toHex(addr) << " F:" << fn_info->detailed_name() << endl;
+		prev_fn_info = fn_info;
+		prev_mod_info = minfo;
+		return;
+	}	
+	
+	// trace only main image
+	if (!IS_MAIN_IMG(addr)) return;
+	
+	prev_fn_info = fn_info;	
+	prev_mod_info = minfo;
 
+	
 	// when IP moves from text section to virtualized section, 
 	// dump virtualized section
 	if (trace_cache_m.find(addr) == trace_cache_m.end()) {
@@ -478,7 +486,7 @@ void EXE_TRC_InsTrc_Inst(TRACE trc, void *v)
 	if (trace_visited_s.find(addr) == trace_visited_s.end()) {
 		trace_visited_s.insert(addr);
 		USIZE size = TRACE_Size(trc);		
-		*fout << toHex(addr) << ' ';
+		*fout << toHex(addr) << " B:";
 		PIN_SafeCopy(buf, (VOID*)addr, size);
 		for (size_t i = 0; i < size; i++) {
 			*fout << toHex1(buf[i]);
@@ -589,7 +597,7 @@ void EXE_INS_RegMemMap_vmenter_Ana(CONTEXT * ctxt, ADDRINT addr, THREADID thread
 #endif
 	if (special_values[6] == special_values[7])
 	{
-		special_values[6] -= sizeof(ADDRINT);
+		special_values[6] -= ADDRSIZE;
 	}
 	for (REG reg : pin_regs)
 	{		
@@ -779,6 +787,7 @@ int main(int argc, char *argv[])
 	fout = new ofstream(outputFileName.c_str());
 
 	isMemTrace = KnobMemoryTrace.Value();
+	
 	if (isMemTrace == "r") isMemReadTrace = true;
 	else if (isMemTrace == "w") isMemWriteTrace = true;
 	else if (isMemTrace == "rw")

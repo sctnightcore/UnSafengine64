@@ -6,6 +6,11 @@
 #ifndef COMMON_PIN_ANALYZER
 #define COMMON_PIN_ANALYZER
 
+#ifdef TARGET_IA32
+constexpr auto ADDRSIZE = 4;
+#else
+constexpr auto ADDRSIZE = 8;
+#endif
 
 using namespace std;
 #include <string>
@@ -15,6 +20,10 @@ using namespace std;
 extern "C" {
 #include "xed-interface.h"
 }
+
+#define TO_ADDRINT(buf) (*static_cast<const ADDRINT*>(static_cast<const void*>(buf)))
+#define TO_UINT32(buf) (*static_cast<const UINT32*>(static_cast<const void*>(buf)))
+#define ADDRINT_TO_BYTES(val, buf) copy(static_cast<const UINT8*>(static_cast<const void*>(&val)), static_cast<const UINT8*>(static_cast<const void*>(&val)) + ADDRSIZE, buf)
 
 // ========================================================================================================================
 // executable module, section, function info by symbol information
@@ -33,6 +42,8 @@ struct fn_info_t {
 	set<ADDRINT> obf_addrs;	// for checking obfuscated code writing
 	string detailed_name();
 	fn_info_t(string m, string n, ADDRINT sa, ADDRINT ea):module_name(m), name(n), saddr(sa), eaddr(ea) {};
+	bool operator==(const fn_info_t &) const;
+	bool operator!=(const fn_info_t &) const;
 };
 
 
@@ -40,6 +51,8 @@ struct fn_info_t {
 struct reg_info_t {
 	ADDRINT addr, size;
 	reg_info_t(ADDRINT sa, ADDRINT sz):addr(sa), size(sz) {};
+	bool operator==(const reg_info_t &) const;
+	bool operator!=(const reg_info_t &) const;
 };
 
 // section info
@@ -48,6 +61,8 @@ struct sec_info_t {
 	string name;
 	ADDRINT saddr, eaddr;
 	sec_info_t(string m, string n, ADDRINT sa, ADDRINT ea):module_name(m), name(n), saddr(sa), eaddr(ea) {};
+	bool operator==(const sec_info_t &) const;
+	bool operator!=(const sec_info_t &) const;
 };
 
 // module info
@@ -68,6 +83,8 @@ struct mod_info_t {
 		else if (n.find(".dll") != string::npos) type = mod_type_dll;
 		else type = mod_type_other;
 	}
+	bool operator==(const mod_info_t &) const;
+	bool operator!=(const mod_info_t &) const;
 };
 
 

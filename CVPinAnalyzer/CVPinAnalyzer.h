@@ -116,7 +116,7 @@ int main(int argc, char * argv[]);
 
 
 ADDRINT toADDRINT(UINT8 *buf) {
-	int n = sizeof(ADDRINT);
+	int n = ADDRSIZE;
 	ADDRINT addr = buf[n - 1];
 	for (int i = n - 2; i >= 0; i--) {
 		addr = (addr << 8) | buf[i];
@@ -131,3 +131,8 @@ ADDRINT buf2val(UINT8 *buf, size_t n) {
 	}
 	return addr;
 }
+
+#define IS_MAIN_IMG(addr) (addr >= main_img_saddr && addr < main_img_eaddr)
+
+fn_info_t* prev_fn_info;
+mod_info_t* prev_mod_info;

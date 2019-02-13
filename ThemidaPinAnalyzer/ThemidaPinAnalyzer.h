@@ -30,6 +30,11 @@ size_t thr_cnt;
 set<size_t> thread_ids;
 PIN_THREAD_UID mainThreadUid;
 
+// internal threads
+int current_resolve_api = -1;	// current resolve api thread number in internal thread
+VOID unpack_thread(VOID *arg);	// unpack thread (main internal thread)
+CONTEXT ctx0;
+
 // ===============
 // for debugging
 // ===============
@@ -48,8 +53,8 @@ ADDRINT loader_eaddr = 0;
 
 bool is_unpack_started = false;	// dll unpack started
 
+
 // trace related variables
-ADDRINT prevaddr;	// previous trace address
 int obfCallLevel = 0;	// flag for recording 1-level obfuscated call instructions
 
 mod_info_t *prevmod;	// previous module
@@ -100,7 +105,133 @@ map<ADDRINT, fn_info_t*> mov_obfaddr2fn;
 map<ADDRINT, ADDRINT> addr2fnaddr;
 
 // obfuscated call instruction address and target address
-vector<pair<ADDRINT, ADDRINT>> obf_call_addrs;
+// obf_call_candidate_addrss is a tuple of <call instruction address, opcode bytes, target address>
+// opcode bytes are stored in ADDRINT type as follows 
+// 
+// call type 
+// - direct_call : direct call. E8 __ __ __ __  
+//   (relative addressing for x86)
+// - indirect_call : indirect call using IAT. FF 15 __ __ __ __. call ds:[______] 
+//                   ex) FF 15 dd cc bb aa -> call ds:[0xaabbccdd] 
+//                      (absolute addressing to indirect address for x86)
+//                   ex) FF 15 dd cc bb aa -> call ds:[0xaabbccdd + next_ip] 
+//                      (relative addressing to indirect address for x64)
+// - indirect_jmp : indirect jmp using IAT. FF 25 __ __ __ __. jmp ds:[______] 
+//                  ex) FF 2F dd cc bb aa -> jmp ds:[0xaabbccdd]
+//                  (absolute addressing to indirect address)
+//                  ex) FF 15 dd cc bb aa -> jmp ds:[0xaabbccdd + next_ip] 
+//                     (relative addressing to indirect address for x64)
+// - indirect_mov : indirect mov using IAT. 
+//     a1 : mov eax, ds : [・]
+//     8b 05 : mov eax, ds : [・]
+//     8b 1d : mov ebx, ds : [・]
+//     8b 0d : mov ecx, ds : [・]
+//     8b 15 : mov edx, ds : [・]
+//     8b 35 : mov esi, ds : [・]
+//     8b 3d : mov edi, ds : [・]
+//    (absolute addressing to indirect address for x86)
+//
+//     48 8b 05 : mov rax, ds : [・]
+//     48 8b 1d : mov rbx, ds : [・]
+//     48 8b 0d : mov rcx, ds : [・]
+//     48 8b 15 : mov rdx, ds : [・]
+//     48 8b 35 : mov rsi, ds : [・]
+//     48 8b 3d : mov rdi, ds : [・]
+//    (relative addressing to indirect address for x64)
+//
+
+
+enum obf_call_type_t {
+	DIRECT_CALL, INDIRECT_CALL, INDIRECT_JMP, INDIRECT_MOV
+};
+
+
+struct obf_call_t {
+	obf_call_t(ADDRINT sa, ADDRINT da, obf_call_type_t it, string r) : srcaddr(sa), dstaddr(da), ins_type(it), reg(r) {};
+	ADDRINT srcaddr;
+	union {
+		ADDRINT dstaddr;
+		ADDRINT indaddr;
+	};	
+	obf_call_type_t ins_type;
+	string reg;
+
+	size_t to_bytes(UINT8* byts) {
+		ADDRINT reladdr;
+		switch (ins_type) {
+		case DIRECT_CALL:
+			byts[0] = 0xe8;			
+			reladdr = dstaddr - (srcaddr + 5);
+			ADDRINT_TO_BYTES(reladdr, byts + 1);
+			return 5;
+		case INDIRECT_CALL:
+			byts[0] = 0xff;
+			byts[1] = 0x1f;
+			if (ADDRSIZE == 4) {				
+				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+			}
+			else {
+				reladdr = indaddr - (srcaddr + 6);
+				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+			}
+			return 6;
+		case INDIRECT_JMP:
+			byts[0] = 0xff;
+			byts[1] = 0x2f;
+			if (ADDRSIZE == 4) {
+				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+			} 
+			else {
+				reladdr = indaddr - (srcaddr + 6);
+				ADDRINT_TO_BYTES(reladdr, byts + 2);
+			}
+			return 6;
+		case INDIRECT_MOV:			
+			if (ADDRSIZE == 4) {
+				byts[0] = 0x8b;
+				if (reg == "eax") byts[1] = 0x05;
+				else if (reg == "ebx") byts[1] = 0x1d;
+				else if (reg == "ecx") byts[1] = 0x0d;
+				else if (reg == "edx") byts[1] = 0x15;
+				else if (reg == "esi") byts[1] = 0x35;
+				else if (reg == "edi") byts[1] = 0x3d;																
+				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+				return 6;
+			}
+			else {	// 64bit
+				byts[0] = 0x48;
+				byts[1] = 0x8b;
+				if (reg == "rax") byts[2] = 0x05;
+				else if (reg == "rbx") byts[2] = 0x1d;
+				else if (reg == "rcx") byts[2] = 0x0d;
+				else if (reg == "rdx") byts[2] = 0x15;
+				else if (reg == "rsi") byts[2] = 0x35;
+				else if (reg == "rdi") byts[2] = 0x3d;
+				reladdr = indaddr - (srcaddr + 7);
+				ADDRINT_TO_BYTES(reladdr, byts + 3);
+				return 7;
+			}		
+		}
+		return 0;
+	}
+};
+
+vector<obf_call_t> obf_call_candidate_addrs;
+
+std::ostream& operator<<(std::ostream &strm, const obf_call_t &a) {
+	switch (a.ins_type) {
+	case DIRECT_CALL:
+		return strm << "direct call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr);
+	case INDIRECT_CALL:
+		return strm << "indirect call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr);
+	case INDIRECT_JMP:
+		return strm << "indirect jmp " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr);
+	case INDIRECT_MOV:
+		return strm << "indirect mov " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " " << a.reg;
+	default:
+		return strm;
+	}
+}
 
 // flags for current status 
 bool isCheckAPIStart = false;
@@ -114,30 +245,14 @@ bool isCheckAPIEnd = false;
 ADDRINT current_obf_fn_addr;
 
 // 64bit export block candidate
-ADDRINT addrZeroBlk = 0;
+ADDRINT imp_start_addr = 0;
+ADDRINT imp_end_addr = 0;
+vector<fn_info_t*> imp_list;
+bool found_IAT = false;
+bool found_zero_blk = false;
 
-
-#define MakeDWORD(buf) (buf[3] | (buf[2] << 8) | (buf[1] << 16) | (buf[0] << 24))
-#define MakeADDR(buf) (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24))
-#define MakeADDR1(buf) (buf[1] | (buf[2] << 8) | (buf[3] << 16) | (buf[4] << 24))
-
-ADDRINT toADDRINT(UINT8 *buf) { 
-	int n = sizeof(ADDRINT);
-	ADDRINT addr = buf[n-1];
-	for (int i = n-2; i >= 0; i--) {
-		addr = (addr << 8) | buf[i];
-	}
-	return addr; 
-}
-
-ADDRINT toADDRINT1(UINT8 *buf) { 
-	int n = sizeof(ADDRINT);
-	ADDRINT addr = buf[n];
-	for (int i = n - 1; i >= 1; i--) {
-		addr = (addr << 8) | buf[i];
-	}
-	return addr;
-}
+// API pre-run trace recording
+vector<ADDRINT> traceAddrSeq;
 
 #define RECORDTRACE 1
 
@@ -155,11 +270,11 @@ void dump_memory();
 void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
 void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
 
-void FindAPICalls_x64();
-bool CheckExportArea_x64(int step);
+void FindObfuscatedAPICalls();
+bool FindIATArea_x64();
 
-void CheckExportFunctions_x64();
-void CheckExportFunctions_x86();
+void PrintIATArea_x64();
+void PrintIATArea_x86();
 
 void TRC_analysis_x64(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
 void INS_MW_analysis_x64(ADDRINT targetAddr);

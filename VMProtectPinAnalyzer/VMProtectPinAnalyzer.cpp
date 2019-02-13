@@ -88,7 +88,7 @@ size_t get_meblock(ADDRINT addr)
 // ========================================================================================================================
 
 
-void FindAPICalls() {	
+void FindObfuscatedAPICalls() {	
 	isFoundAPICalls = true;
 #if LOG_CALL_CHECK == 1
 	*fout << "# Find API Calls" << endl;
@@ -215,7 +215,7 @@ bool FindGap()
 {
 	bool retVal = false;
 
-	size_t size_iat = (isDirectCall?mov_obfaddr2fn.size():obfaddr2fn.size()) * sizeof(ADDRINT);
+	size_t size_iat = (isDirectCall?mov_obfaddr2fn.size():obfaddr2fn.size()) * ADDRSIZE;
 
 	sec_info_t *nextsection = GetNextSectionInfo(obf_rdata_saddr);
 
@@ -229,13 +229,13 @@ bool FindGap()
 	LOG("gap start address " + toHex(gap_start_addr) + '\n');
 
 	// addrZeroBlk = gap_start_addr;
-	addrZeroBlk = obf_rdata_saddr;
+	imp_start_addr = obf_rdata_saddr;
 
 	EXCEPTION_INFO *pExinfo = NULL;
 	size_t numcopied = PIN_SafeCopyEx(memory_buffer, (VOID*)obf_rdata_saddr, obf_rdata_eaddr - obf_rdata_saddr, pExinfo);
 
-	for (ADDRINT addr = obf_rdata_saddr; addr < obf_rdata_eaddr; addr += sizeof(ADDRINT)) {			
-		ADDRINT val = toADDRINT(memory_buffer + addr - obf_rdata_saddr);
+	for (ADDRINT addr = obf_rdata_saddr; addr < obf_rdata_eaddr; addr += ADDRSIZE) {			
+		ADDRINT val = TO_ADDRINT(memory_buffer + addr - obf_rdata_saddr);
 		if (GetAddrInfo(val) == "") {
 			// insert RVA of function slot
 			function_slots_in_rdata.push_back(addr - main_img_saddr);
@@ -252,7 +252,7 @@ bool FindGap()
 void CheckExportFunctions()
 {
 
-	size_t blksize = main_txt_eaddr - addrZeroBlk;;
+	size_t blksize = main_txt_eaddr - imp_start_addr;;
 
 	map<string, fn_info_t*> sorted_api_map;
 	for (auto it: (isDirectCall?mov_obfaddr2fn:obfaddr2fn)) {	
@@ -264,7 +264,7 @@ void CheckExportFunctions()
 
 	//LOG("ZERO BLOCK " + toHex(addrZeroBlk) + '\n');
 
-	ADDRINT current_addr = addrZeroBlk;
+	ADDRINT current_addr = imp_start_addr;
 	ADDRINT rel_addr = 0;
 	vector<pair<ADDRINT, fn_info_t*>> result_vec;
 	
@@ -280,13 +280,13 @@ void CheckExportFunctions()
 	//	// assign resolved function address to candidate IAT area
 	//	fn_info_t *fninfo = it->second;		
 	//	result_vec.push_back(make_pair(current_addr - obf_img_saddr, it->second));
-	//	current_addr += sizeof(ADDRINT);
+	//	current_addr += ADDRSIZE;
 	//	idx++;
 	//}
 
 	// print IAT info
-	*fout << "IAT START: " << toHex(addrZeroBlk - main_img_saddr) << endl;
-	*fout << "IAT SIZE: " << toHex(function_slots_in_rdata.size() * sizeof(ADDRINT)) << endl;
+	*fout << "IAT START: " << toHex(imp_start_addr - main_img_saddr) << endl;
+	*fout << "IAT SIZE: " << toHex(function_slots_in_rdata.size() * ADDRSIZE) << endl;
 	/*for (auto it = result_vec.begin(); it != result_vec.end(); it++) {
 		*fout << toHex(it->first) << "\taddr\t" << it->second->module_name << '\t' << it->second->name << endl;
 	}*/
@@ -314,9 +314,9 @@ void FindExistingIAT()
 
 	vector<pair<size_t, ADDRINT>> IATCandidates;
 	
-	for (size_t i = 0; i < numcopied; i += sizeof(ADDRINT)) {		
+	for (size_t i = 0; i < numcopied; i += ADDRSIZE) {		
 		// check whether the value of the current address points to a API function		
-		ADDRINT target = toADDRINT(memory_buffer + i);
+		ADDRINT target = TO_ADDRINT(memory_buffer + i);
 		fn_info_t *fn = GetFunctionInfo(target);		
 		if (fn != NULL) {
 			IATCandidates.push_back(make_pair(i, target));
@@ -336,7 +336,7 @@ void FindExistingIAT()
 
 	for (size_t i = 1; i < IATCandidates.size(); i++) {
 		i1 = IATCandidates.at(i).first;
-		if (i1 - i0 > sizeof(ADDRINT) * 2) {
+		if (i1 - i0 > ADDRSIZE * 2) {
 			// save only IAT having more than 5 function addresses
 			if (adjacentCnt > 5) {
 				IATCandidates_selected.push_back(make_pair(IATStartAddr, i1));				
@@ -356,7 +356,7 @@ void FindExistingIAT()
 
 	//// print IAT info
 	//*fout << "IAT START: " << toHex(addrZeroBlk - obf_img_saddr) << endl;
-	//*fout << "IAT SIZE: " << toHex(idx * sizeof(ADDRINT)) << endl;
+	//*fout << "IAT SIZE: " << toHex(idx * ADDRSIZE) << endl;
 	//for (auto it = result_vec.begin(); it != result_vec.end(); it++) {
 	//	*fout << toHex(it->first) << "\taddr\t" << it->second->module_name << '\t' << it->second->name << endl;
 	//}
@@ -376,15 +376,24 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 
 	if (isCheckAPIRunning) {
 #if LOG_CALL_CHECK == 1
-		*fout << "# CheckAPI running " << toHex(addr) << ' ' << GetAddrInfo(addr) << endl;
-		string addrinfo = GetAddrInfo(addr);
+		*fout << "# CheckAPI running " << toHex(addr) << ' ' << GetAddrInfo(addr) << endl;	
 #endif
 
 		ADDRINT caller_addr = current_obfuscated_call->caller_addr;
 		ADDRINT prev_addr = 0;
+		
+		// start of the trace
 		if (!traceAddrSeq.empty())
 		{
 			prev_addr = *traceAddrSeq.rbegin();
+		}
+
+		// limit trace length to prevent infinite loop
+		if (traceAddrSeq.size() > 20)
+		{
+			isCheckAPIStart = true;
+			isCheckAPIRunning = false;
+			goto check_api_start;
 		}
 
 		fn_info_t *fninfo = GetFunctionInfo(addr);
@@ -393,12 +402,12 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 		traceAddrSeq.push_back(addr);
 		traceSPSeq.push_back(stkptr);
 
+		// check abnormal instruction
 		size_t cnt = 0;
 		for (auto ins_addr : *trace_cache_m[addr])
 		{			
 			string asmcode = asmcode_m[ins_addr];
 			
-			// if abnormal instruction, leave
 			if (check_abnormal_ins(asmcode))
 			{
 				isCheckAPIStart = true;
@@ -467,7 +476,7 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 		}
 
 		// if the trace not in in API function, skip
-		if (fninfo == NULL) return;
+		if (fninfo == NULL || fninfo->name == ".text") return;
 
 		// skip user exception by false positive find api calls
 		if (fninfo->name.find("KiUserExceptionDispatcher") != string::npos)
@@ -479,14 +488,14 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 
 		// Check call/jmp
 		// Compare stack top to check the return address which points to the next to the caller instruction. 		
-		PIN_SafeCopy((VOID*)memory_buffer, (VOID*)stkptr, sizeof(ADDRINT));
-		ADDRINT stk_top_value = toADDRINT(memory_buffer);
+		PIN_SafeCopy((VOID*)memory_buffer, (VOID*)stkptr, ADDRSIZE);
+		ADDRINT stk_top_value = TO_ADDRINT(memory_buffer);
 		ADDRINT original_addr;		
 		ADDRINT adjusted_caller_addr;		
 		string call_type;
 
 		INT32 stk_diff = traceSPSeq[0] - stkptr;
-		if (stk_diff != 0 && stk_diff != sizeof(ADDRINT) && stk_diff != -sizeof(ADDRINT))
+		if (stk_diff != 0 && stk_diff != ADDRSIZE && stk_diff != -ADDRSIZE)
 		{
 			isCheckAPIStart = true;
 			isCheckAPIRunning = false;
@@ -497,7 +506,7 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 
 		if (stk_top_value == caller_addr + 5 || stk_top_value == caller_addr + 6) {				
 			call_type = "call";
-			if (stk_diff == sizeof(ADDRINT))
+			if (stk_diff == ADDRSIZE)
 			{
 				adjusted_caller_addr = caller_addr;
 			}
@@ -519,7 +528,7 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, UINT32 size, THREADID threadid)
 			{				
 				adjusted_caller_addr = caller_addr;	
 			}
-			else if (stk_diff == -sizeof(ADDRINT))
+			else if (stk_diff == -ADDRSIZE)
 			{
 				adjusted_caller_addr = caller_addr - 1;
 			}
@@ -739,7 +748,7 @@ void TRC_inst(TRACE trace, void *v)
 		if (is_unpack_started && ((addr >= loader_saddr && addr < loader_eaddr) || (addr >= main_txt_saddr && addr < main_txt_eaddr)))
 		{
 			if (!isFoundAPICalls) {
-				FindAPICalls();
+				FindObfuscatedAPICalls();
 				isCheckAPIStart = true;
 			}
 		}
@@ -751,7 +760,8 @@ void TRC_inst(TRACE trace, void *v)
 			// find OEP 
 			if (oep == 0) {
 				set_meblock(addr);
-				if (get_mwblock(addr) && get_meblock(addr) == 1)
+				// vmprotect without packing option
+				if (1) // get_mwblock(addr) && get_meblock(addr) == 1)
 				{
 					BBL bbl = TRACE_BblHead(trace);
 					INS ins = BBL_InsHead(bbl);
@@ -759,7 +769,7 @@ void TRC_inst(TRACE trace, void *v)
 					if (!INS_IsRet(ins) /* && !INS_IsCall(ins)*/) {
 						oep = addr;
 						*fout << "OEP:" << toHex(oep - main_img_saddr) << endl;
-						FindAPICalls();
+						FindObfuscatedAPICalls();
 						isCheckAPIStart = true;
 					}
 				}
@@ -823,8 +833,8 @@ bool CheckExportArea_x64(int step)
 	// step 1: find zero block
 	if (step == 1) {
 		bool isZeroBlk = true;
-		if (addrZeroBlk != 0) goto free_buf;
-		addrZeroBlk = 0;
+		if (imp_start_addr != 0) goto free_buf;
+		imp_start_addr = 0;
 
 		for (size_t blk = 0; blk < txtsize; blk += 0x1000) {
 			isZeroBlk = true;
@@ -835,7 +845,7 @@ bool CheckExportArea_x64(int step)
 				}
 			}
 			if (isZeroBlk) {
-				addrZeroBlk = main_txt_saddr + blk;
+				imp_start_addr = main_txt_saddr + blk;
 				retVal = true;
 				goto free_buf;
 			}
@@ -844,12 +854,12 @@ bool CheckExportArea_x64(int step)
 	// step 2: check whether the zero block is filled
 	else if (step == 2) {
 		bool isZeroBlk = true;
-		if (addrZeroBlk == 0) {
+		if (imp_start_addr == 0) {
 			retVal = false;
 			goto free_buf;
 		}
 		for (size_t i = 0; i < 0x1000; i++) {
-			if (buf[addrZeroBlk - main_txt_saddr + i] != 0) {
+			if (buf[imp_start_addr - main_txt_saddr + i] != 0) {
 				retVal = true;
 				goto free_buf;
 			}

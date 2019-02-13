@@ -104,7 +104,7 @@ struct call_info_t {
 
 // obfuscated call instruction address and target address
 vector<call_info_t*> obfuscated_call_candidate_addrs;
-
+vector<pair<ADDRINT, ADDRINT>> obf_call_addrs;
 
 // flags for current status 
 bool isRegSaved = false;
@@ -113,6 +113,7 @@ bool isCheckAPIRunning = false;
 bool isFoundAPICalls = false;
 size_t current_obf_fn_pos = 0;
 
+// API pre-run trace recording
 vector<ADDRINT> traceAddrSeq;
 vector<ADDRINT> traceSPSeq;
 map<REG, pair<ADDRINT, string>> movRegApiFnAddrs;
@@ -128,16 +129,11 @@ bool isCheckAPIEnd = false;
 ADDRINT current_obf_fn_addr;
 
 // export block candidate
-ADDRINT addrZeroBlk = 0;
+ADDRINT imp_start_addr = 0;
 vector<ADDRINT> function_slots_in_rdata;
 
-
-#define MakeDWORD(buf) (buf[3] | (buf[2] << 8) | (buf[1] << 16) | (buf[0] << 24))
-#define MakeADDR(buf) (buf[0] | (buf[1] << 8) | (buf[2] << 16) | (buf[3] << 24))
-#define MakeADDR1(buf) (buf[1] | (buf[2] << 8) | (buf[3] << 16) | (buf[4] << 24))
-
 ADDRINT toADDRINT(UINT8 *buf) { 
-	int n = sizeof(ADDRINT);
+	int n = ADDRSIZE;
 	ADDRINT addr = buf[n-1];
 	for (int i = n-2; i >= 0; i--) {
 		addr = (addr << 8) | buf[i];
@@ -146,7 +142,7 @@ ADDRINT toADDRINT(UINT8 *buf) {
 }
 
 ADDRINT toADDRINT1(UINT8 *buf) { 
-	int n = sizeof(ADDRINT);
+	int n = ADDRSIZE;
 	ADDRINT addr = buf[n];
 	for (int i = n - 1; i >= 1; i--) {
 		addr = (addr << 8) | buf[i];
@@ -175,7 +171,7 @@ size_t get_mwblock(ADDRINT addr);
 bool set_meblock(ADDRINT addr);
 size_t get_meblock(ADDRINT addr);
 
-void FindAPICalls();
+void FindObfuscatedAPICalls();
 bool FindGap();
 void IMG_inst(IMG img, void *v);
 void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
