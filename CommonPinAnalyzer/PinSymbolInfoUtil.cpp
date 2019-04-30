@@ -22,7 +22,7 @@ std::ostream& operator<<(std::ostream &strm, const sec_info_t &a) {
 }
 
 std::ostream& operator<<(std::ostream &strm, const mod_info_t &a) {
-	return strm << a.name << "[" << toHex(a.saddr) << "," << toHex(a.eaddr) << "]";
+	return strm << a.path << "[" << toHex(a.saddr) << "," << toHex(a.eaddr) << "]";
 }
 
 

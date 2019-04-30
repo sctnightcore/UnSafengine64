@@ -18,6 +18,7 @@ string isMemTrace = "";
 bool isMemReadTrace = false;
 bool isMemWriteTrace = false;
 bool isInsTrace = false;
+bool isBlockTrace = false;
 bool isDumpCode = false;
 bool isRegMemMap = false;
 
@@ -94,6 +95,7 @@ map<string, mod_info_t*> module_info_m;
 map<ADDRINT, fn_info_t*> fn_info_m;
 map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 
+
 // Memory Trace Instrumentation
 void EXE_TRC_Memtrc_analysis(ADDRINT addr, THREADID threadid);
 void EXE_TRC_MemTrace_inst(TRACE trace, void *v);
@@ -111,6 +113,11 @@ void EXE_INS_RegMemMap_vmenter_Ana(CONTEXT *ctxt, ADDRINT addr, THREADID threadi
 void EXE_INS_RegMemMap_before_Ana(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid, BOOL is_stack);
 void EXE_INS_RegMemMap_after_Ana(CONTEXT *ctxt, size_t mSize, THREADID threadid, BOOL is_stack);
 void dump_registers(CONTEXT *ctxt, THREADID tid);
+
+// Default block(=trace) tracing
+void EXE_TRC_Blk_Inst(TRACE trace, void *v);
+void EXE_BBL_Analysis(ADDRINT addr, ADDRINT size, THREADID threadid);
+void EXE_INS_HandlerExit_Analysis(ADDRINT addr, THREADID tid);
 
 int main(int argc, char * argv[]);
 

@@ -12,6 +12,8 @@ constexpr auto ADDRSIZE = 4;
 constexpr auto ADDRSIZE = 8;
 #endif
 
+#define TO_LOWER(str) transform(str.begin(), str.end(), str.begin(), [](unsigned char c) { return std::tolower(c); })
+
 using namespace std;
 #include <string>
 #include "pin.H"
@@ -68,6 +70,7 @@ struct sec_info_t {
 // module info
 struct mod_info_t {
 	string name;
+	string path;
 	mod_type type;
 	ADDRINT saddr, eaddr;
 	vector<sec_info_t*> sec_infos;
@@ -78,9 +81,12 @@ struct mod_info_t {
 	bool isEXE() {
 		return (type == mod_type_exe);
 	}
-	mod_info_t(string n, ADDRINT sa, ADDRINT ea):name(n), saddr(sa), eaddr(ea)  {
-		if (n.find(".exe") != string::npos) type = mod_type_exe;
-		else if (n.find(".dll") != string::npos) type = mod_type_dll;
+	mod_info_t(string p, ADDRINT sa, ADDRINT ea):path(p), saddr(sa), eaddr(ea)  {
+		size_t pos = p.rfind("\\") + 1;
+		name = p.substr(pos);
+		TO_LOWER(name);
+		if (name.find(".exe") != string::npos) type = mod_type_exe;
+		else if (name.find(".dll") != string::npos) type = mod_type_dll;
 		else type = mod_type_other;
 	}
 	bool operator==(const mod_info_t &) const;

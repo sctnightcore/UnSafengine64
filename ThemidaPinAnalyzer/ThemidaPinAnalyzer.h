@@ -35,11 +35,13 @@ int current_resolve_api = -1;	// current resolve api thread number in internal t
 VOID unpack_thread(VOID *arg);	// unpack thread (main internal thread)
 CONTEXT ctx0;
 
-// ===============
-// for debugging
-// ===============
+// code cache
 map<ADDRINT, string> asmcode_m;
+
+// trace cache
 map<ADDRINT, vector<ADDRINT>*> trace_cache_m;
+map<ADDRINT, ADDRINT> trace_next_addr_m;
+
 
 // Buffer
 UINT8 memory_buffer[1024 * 1024 * 100];	// code cache buffer size is 100MB
@@ -147,7 +149,8 @@ enum obf_call_type_t {
 
 
 struct obf_call_t {
-	obf_call_t(ADDRINT sa, ADDRINT da, obf_call_type_t it, string r) : srcaddr(sa), dstaddr(da), ins_type(it), reg(r) {};
+	obf_call_t(ADDRINT sa, ADDRINT da, obf_call_type_t it, string r, size_t g) : 
+		srcaddr(sa), dstaddr(da), ins_type(it), reg(r), prev_push_inst_size(g) {};
 	ADDRINT srcaddr;
 	union {
 		ADDRINT dstaddr;
@@ -155,6 +158,7 @@ struct obf_call_t {
 	};	
 	obf_call_type_t ins_type;
 	string reg;
+	size_t prev_push_inst_size;
 
 	size_t to_bytes(UINT8* byts) {
 		ADDRINT reladdr;
@@ -221,19 +225,20 @@ vector<obf_call_t> obf_call_candidate_addrs;
 std::ostream& operator<<(std::ostream &strm, const obf_call_t &a) {
 	switch (a.ins_type) {
 	case DIRECT_CALL:
-		return strm << "direct call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr);
+		return strm << "direct call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " push_size:" << a.prev_push_inst_size;
 	case INDIRECT_CALL:
-		return strm << "indirect call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr);
+		return strm << "indirect call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " push_size:" << a.prev_push_inst_size;;
 	case INDIRECT_JMP:
-		return strm << "indirect jmp " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr);
+		return strm << "indirect jmp " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " push_size:" << a.prev_push_inst_size;;
 	case INDIRECT_MOV:
-		return strm << "indirect mov " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " " << a.reg;
+		return strm << "indirect mov " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " " << a.reg << " push_size:" << a.prev_push_inst_size;;
 	default:
 		return strm;
 	}
 }
 
 // flags for current status 
+bool isRegSaved = false;
 bool isCheckAPIStart = false;
 bool isCheckAPIRunning = false;
 size_t current_obf_fn_pos = 0;
@@ -253,10 +258,46 @@ bool found_zero_blk = false;
 
 // API pre-run trace recording
 vector<ADDRINT> traceAddrSeq;
+vector<ADDRINT> traceSPSeq;
+map<REG, pair<ADDRINT, string>> movRegApiFnAddrs;
+
+obf_call_t *current_obfuscated_call;
 
 #define RECORDTRACE 1
 
+// registers used for obfuscation
+#ifdef TARGET_IA32
+REG regs_for_obfuscation[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI };
+REG regs_ctx[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI, REG_ESP, REG_EBP };
+#elif TARGET_IA32E
+REG regs_for_obfuscation[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI };
+REG regs_ctx[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI, REG_RSP, REG_RBP };
+#endif	
+map<REG, ADDRINT> regs_saved;
 
+void save_regs(LEVEL_VM::CONTEXT * ctxt);
+void restore_regs(LEVEL_VM::CONTEXT * ctxt);
+
+
+
+void dump_memory();
+
+void FindObfuscatedAPICalls();
+bool FindIATArea();
+void PrintIATArea();
+
+// Pintool Instrumentation and Analysis Functions
+void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
+void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
+void IMG_inst(IMG img, void *v);
+void INS_inst(INS ins, void *v);
+void INS_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+void INS_MW_analysis(size_t mSize, ADDRINT targetAddr);
+void INS_MR_analysis(ADDRINT targetAddr);
+void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+void TRC_inst(TRACE trace, void *v);
+
+// Memory Read Write Helper
 void clear_mwblocks();
 void clear_meblocks();
 ADDRINT blk2addr(unsigned blk);
@@ -264,32 +305,3 @@ bool set_mwblock(ADDRINT addr);
 size_t get_mwblock(ADDRINT addr);
 bool set_meblock(ADDRINT addr);
 size_t get_meblock(ADDRINT addr);
-
-void dump_memory();
-
-void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
-void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
-
-void FindObfuscatedAPICalls();
-bool FindIATArea_x64();
-
-void PrintIATArea_x64();
-void PrintIATArea_x86();
-
-void TRC_analysis_x64(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
-void INS_MW_analysis_x64(ADDRINT targetAddr);
-void TRC_inst_x64(TRACE trace, void *v);
-
-void IMG_inst(IMG img, void *v);
-
-void DLL_TRC_inst(TRACE trace, void *v);
-void DLL_INS_inst(INS ins, void *v);
-
-void DLL64_TRC_inst(TRACE trace, void *v);
-void DLL64_TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
-void DLL64_FixIAT();
-
-void INS_inst(INS ins, void *v);
-void INS_analysis(ADDRINT addr, THREADID threadid);
-void INS_MW_analysis(size_t mSize, ADDRINT targetAddr);
-void INS_MR_analysis(ADDRINT targetAddr);

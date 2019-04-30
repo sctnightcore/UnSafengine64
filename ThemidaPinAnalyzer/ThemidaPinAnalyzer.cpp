@@ -27,9 +27,21 @@ set<ADDRINT> mwaddrs;
 size_t mwblocks[MAX_BLOCKS];
 size_t meblocks[MAX_BLOCKS];
 
-// check api pre-run running check
-#define LOG_CALL_CHECK 0
 
+// register save & restore
+void restore_regs(LEVEL_VM::CONTEXT * ctxt)
+{
+	for (REG reg : regs_ctx) {
+		PIN_SetContextReg(ctxt, reg, regs_saved[reg]);
+	}
+}
+
+void save_regs(LEVEL_VM::CONTEXT * ctxt)
+{
+	for (REG reg : regs_ctx) {
+		regs_saved[reg] = PIN_GetContextReg(ctxt, reg);
+	}
+}
 
 void clear_mwblocks()
 {
@@ -133,7 +145,7 @@ void dump_memory()
 
 
 // ========================================================================================================================
-// API Detection Functions for x64
+// API Detection Functions 
 // ========================================================================================================================
 
 /// Find obfuscated API Calls
@@ -164,109 +176,248 @@ void FindObfuscatedAPICalls()
 
 	// search for address modification in program
 
-	for (bufp = buf, idx = 0; idx < numcopied - 6; idx++, bufp++)
+	if (packer_type == "themida" || packer_type == "enigma") 
 	{
-		if (ADDRSIZE == 4)
+		for (bufp = buf, idx = 0; idx < numcopied - 6; idx++, bufp++)
 		{
-			// Themida x86
-			// --------------
-			// CALL r/m32 (FF 1F __ __ __ __)
-			// is patched by Themida into
-			// CALL rel32; NOP (E8 __ __ __ __ 90)
-			if (*bufp == 0xE8 && bufp[5] == 0x90)
+			if (ADDRSIZE == 4)
 			{
-
-				addr = main_txt_saddr + idx;
-				target_addr = addr + 5 + TO_UINT32(bufp + 1);
-
-				if (obfaddr2fn.find(target_addr) != obfaddr2fn.end())
+				// Themida x86
+				// --------------
+				// CALL r/m32 (FF 1F __ __ __ __)
+				// is patched by Themida into
+				// CALL rel32; NOP (E8 __ __ __ __ 90)
+				// CALL rel32; NOP (90 E8 __ __ __ __)
+				if (*bufp == 0xE8 && bufp[5] == 0x90)
 				{
-					fn_info_t *fn = obfaddr2fn[target_addr];
-					string modstr = fn->module_name;
-					string fnstr = fn->name;
-					string reladdr = toHex(addr - main_txt_saddr);
-					*fout << reladdr << "\tcall " << modstr << '\t' << fnstr << endl;
+
+					addr = main_txt_saddr + idx;
+					target_addr = addr + 5 + TO_UINT32(bufp + 1);
+
+					if (obfaddr2fn.find(target_addr) != obfaddr2fn.end())
+					{
+						fn_info_t *fn = obfaddr2fn[target_addr];
+						string modstr = fn->module_name;
+						string fnstr = fn->name;
+						string reladdr = toHex(addr - main_img_saddr);
+						*fout << reladdr << "\tcall " << modstr << '\t' << fnstr << endl;
+					}
 				}
-			}
-
-			// Enigma Protector x86
-			// ---------------------
-			// Enigma Protector preserve CALL r/m32
-			// CALL [addr] (FF 15 __ __ __ __)
-			// But the address points to allocated memory area
-			// where the API function is copied into. 
-			else if (*bufp == 0xFF && bufp[1] == 0x15)
-			{
-				// addr: current address
-				// addr2: redirection address in bracket
-				// target_addr: real API address
-				addr = main_txt_saddr + idx;
-				sec_info_t *tmp_sec = GetSectionInfo(addr);
-
-				if (current_section == NULL) {
-					current_section = tmp_sec;
-				}
-				else if (current_section != tmp_sec) {
-					break;
-				}
-
-				bufp2 = bufp + 2;
-				addr2 = TO_ADDRINT(bufp2);
-				// *fout << toHex(addr) << " call [" << toHex(addr2) << ']' << endl;
-				idx2 = addr2 - main_txt_saddr;
-
-				// skip malformed address
-				// address should be inside the image
-				if (idx2 > scan_area_size) continue;
-
-				bufp2 = buf + idx2;
-				target_addr = TO_ADDRINT(bufp2);
-
-				// *fout << '[' << toHex(addr2) << "]=" << toHex(target_addr);
-
-				if (obfaddr2fn.find(target_addr) != obfaddr2fn.end())
+				
+				else if (*bufp == 0x90 && bufp[1] == 0xE8)
 				{
-					fn_info_t *fn = obfaddr2fn[target_addr];
 
-					string modstr = fn->module_name;
-					string fnstr = fn->name;
-					string reladdr = toHex(addr - main_txt_saddr);
-					*fout << reladdr << "\tcall " << modstr << '\t' << fnstr << endl;
+					addr = main_txt_saddr + idx;
+					target_addr = addr + 6 + TO_UINT32(bufp + 2);
+
+					if (obfaddr2fn.find(target_addr) != obfaddr2fn.end())
+					{
+						fn_info_t *fn = obfaddr2fn[target_addr];
+						string modstr = fn->module_name;
+						string fnstr = fn->name;
+						string reladdr = toHex(addr - main_img_saddr);
+						*fout << reladdr << "\tcall " << modstr << '\t' << fnstr << endl;
+					}
 				}
-			}
-		}
-		else if (ADDRSIZE == 8) 
-		{
-			// CALL r/m32 (FF 1F __ __ __ __)
-			// is patched by Themida64 into
-			// CALL rel32; db 00 (E8 __ __ __ __ ; 00)
-			if (*bufp == 0xE8 && (bufp[5] == 0x00 || bufp[5] == 0x90))
-			{
-				addr = main_txt_saddr + idx;				
-				target_addr = addr + 5 + TO_UINT32(bufp + 1);				
-				current_section = GetSectionInfo(addr);
-				target_section = GetSectionInfo(target_addr);
-				if (current_section == NULL || target_section == NULL) continue;
-				// obfuscated call target is selected by 
-				// - call targets into other section of the main executables				
 
-				if (current_section->module_name == target_section->module_name &&
-					current_section->saddr != target_section->saddr) {
-					if (check_ins_valid(addr)) {						
-						obf_call_candidate_addrs.push_back(obf_call_t(addr, target_addr, INDIRECT_CALL, ""));
+				// Enigma Protector x86
+				// ---------------------
+				// Enigma Protector preserve CALL r/m32
+				// CALL [addr] (FF 15 __ __ __ __)
+				// But the address points to allocated memory area
+				// where the API function is copied into. 
+				else if (*bufp == 0xFF && bufp[1] == 0x15)
+				{
+					// addr: current address
+					// addr2: redirection address in bracket
+					// target_addr: real API address
+					addr = main_txt_saddr + idx;
+					sec_info_t *tmp_sec = GetSectionInfo(addr);
+
+					if (current_section == NULL) {
+						current_section = tmp_sec;
+					}
+					else if (current_section != tmp_sec) {
+						break;
+					}
+
+					bufp2 = bufp + 2;
+					addr2 = TO_ADDRINT(bufp2);
+					// *fout << toHex(addr) << " call [" << toHex(addr2) << ']' << endl;
+					idx2 = addr2 - main_txt_saddr;
+
+					// skip malformed address
+					// address should be inside the image
+					if (idx2 > scan_area_size) continue;
+
+					bufp2 = buf + idx2;
+					target_addr = TO_ADDRINT(bufp2);
+
+					// *fout << '[' << toHex(addr2) << "]=" << toHex(target_addr);
+
+					if (obfaddr2fn.find(target_addr) != obfaddr2fn.end())
+					{
+						fn_info_t *fn = obfaddr2fn[target_addr];
+
+						string modstr = fn->module_name;
+						string fnstr = fn->name;
+						string reladdr = toHex(addr - main_img_saddr);
+						*fout << reladdr << "\tcall " << modstr << '\t' << fnstr << endl;
 					}
 				}
 			}
-		}				
+			else if (ADDRSIZE == 8)
+			{
+				// CALL r/m32 (FF 1F __ __ __ __)
+				// is patched by Themida64 into
+				// CALL rel32; db 00 (E8 __ __ __ __ ; 00)
+				if (*bufp == 0xE8 && (bufp[5] == 0x00 || bufp[5] == 0x90))
+				{
+					addr = main_txt_saddr + idx;
+					target_addr = addr + 5 + TO_UINT32(bufp + 1);
+					current_section = GetSectionInfo(addr);
+					target_section = GetSectionInfo(target_addr);
+					if (current_section == NULL || target_section == NULL) continue;
+					// obfuscated call target is selected by 
+					// - call targets into other section of the main executables				
+
+					if (current_section->module_name == target_section->module_name &&
+						current_section->saddr != target_section->saddr) {
+						if (check_ins_valid(addr)) {
+							obf_call_candidate_addrs.push_back(obf_call_t(addr, target_addr, INDIRECT_CALL, "", false));
+						}
+					}
+				}
+			}
+		}
 	}
+	else if (packer_type == "vmp")
+	{
+		for (idx = 0; idx < numcopied - 6; idx++)
+		{
+			// CALL r/m32 (FF 1F __ __ __ __)
+			// is patched by VMProtect into
+			// CALL rel32; ?? (E8 __ __ __ __ ; ??)
+			if (buf[idx] == 0xE8)
+			{
+				addr = main_txt_saddr + idx;
+
+				// PATTERN 1-1: MOV reg, [e_api_fn] / ... / CALL r32 -> CALL imm32; RET or NOP / ... / CALL r32
+				// -----------------------------------------------------------------
+				// caller_addr-1: MOV reg, [e_api_fn]	# B8~BF ____ : 6 bytes
+				// ...
+				// reg_call_addr: CALL reg				# ____ : 2 bytes
+				// ->
+				// caller_addr-1: PUSH r32		# 50~57 1 bytes
+				// caller_addr  : CALL imm32	# E8 ________ 5 bytes
+				// ...
+				// reg_call_addr: CALL reg		# ____ : 2 bytes
+
+
+				// PATTERN 1-2: MOV reg, [e_api_fn] / ... / CALL reg -> CALL imm32; db xx (1byte) / ... / CALL reg
+				// -----------------------------------------------------------------
+				// caller_addr  : MOV ESI, [api_addr]	# B8~BF ____ : 6 bytes
+				// ...
+				// reg_call_addr: CALL reg				# FFD6 : 2 bytes
+				// ->
+				// caller_addr  : CALL imm32 	# E8 ________ : 5 bytes
+				// caller_addr+5: db __			# __ : 1 byte
+				// ...
+				// reg_call_addr: CALL reg				# FFD6 : 2 bytes
+
+
+				// PATTERN 2-1: CALL indirect -> PUSH r32; CALL imm32
+				// -----------------------------------------------------------------
+				// caller_addr-1: CALL imm32 # (48) FF 15 __ __ __ __	: 6 bytes or 7 bytes (with REX.W prefix)
+				// ->
+				// caller_addr-1: PUSH r32		# 50~57 1 bytes
+				// caller_addr  : CALL ___ # (48) E8 __ __ __ __ : 5 bytes or 6 bytes (with REX.W prefix)		
+
+				// PATTERN 2-2: CALL indirect -> CALL imm32; RET or NOP or INT3
+				// caller_addr  : CALL ___ # (48) FF 15 __ __ __ __	: 6~7 bytes
+				// ->
+				// caller_addr  : CALL ___ # (48) E8 __ __ __ __ : 5~6 bytes
+				// caller_addr+5: NOP or RET or INT3 # 90 or C3 or CC : 1 byte
+
+
+				// PATTERN 3-1: JMP indirect -> PUSH r32; CALL imm32
+				// -----------------------------------------------------------------
+				// caller_addr-1: JMP ___ # (48) FF 25 __ __ __ __	: 6 bytes or 7 bytes (with REX.W prefix)
+				// ->
+				// caller_addr-1: PUSH r32		# 50~57 1 bytes
+				// caller_addr  : CALL ___ # (48) E8 __ __ __ __ : 5 bytes or 6 bytes (with REX.W prefix)			
+
+
+				// PATTERN 3-2: JMP indirect -> CALL imm32; RET or NOP
+				// -----------------------------------------------------------------
+				// caller_addr  : JMP ___ # (48) FF 25 __ __ __ __	: 6 bytes or 7 bytes (with REX.W prefix)
+				// ->
+				// caller_addr  : CALL ___ # (48) E8 __ __ __ __ : 5 bytes or 6 bytes (with REX.W prefix)
+				// caller_addr+5: NOP or RET # 90 or C3 : 1 byte
+
+
+				size_t pattern_before_push_reg = 0;				
+				bool has_rexw = false;
+
+				// check rex.w
+				if (ADDRSIZE == 8 && buf[idx - 1] == 0x48) {
+					has_rexw = true;
+				}
+
+
+				// push reg at caller_addr : PATTERN 1-1, 2-1, 3-1
+				if (buf[idx - 1] >= 0x50 && buf[idx - 1] <= 0x57) {
+					pattern_before_push_reg = 1;
+					// sometimes vmprotect add rex.w prefix
+					if (ADDRSIZE == 8 && buf[idx - 2] == 0x48) {						
+						pattern_before_push_reg++;
+					}						
+				}
+
+				target_addr = addr + 5 + buf[idx + 1] + (buf[idx + 2] << 8) + (buf[idx + 3] << 16) + (buf[idx + 4] << 24);
+
+				if (target_addr >= main_txt_saddr && target_addr < main_txt_eaddr)
+				{
+					continue;	// skip function call into the same section
+				}
+				sec_info_t *current_section = GetSectionInfo(addr);
+				sec_info_t *target_section = GetSectionInfo(target_addr);
+
+				if (current_section == NULL || target_section == NULL) continue;
+
+				// obfuscated call target is selected by 
+				// - call targets into other section of the main executables
+				if (current_section->module_name == target_section->module_name &&
+					current_section->saddr != target_section->saddr) {
+					if (has_rexw) addr--;
+					obf_call_candidate_addrs.push_back(obf_call_t(addr, target_addr, INDIRECT_CALL, "", pattern_before_push_reg));
+				}
+			}
+		}
+	}
+
 	free(buf);
 }
 
-bool FindIATArea_x64()
+
+bool FindIATArea()
 {
 	bool retVal = false;
 
+	if (packer_type == "vmp")
+	{
+		imp_start_addr = obf_rdata_saddr;
+		imp_end_addr = obf_rdata_eaddr;
+		found_IAT = false;
+		return true;
+	}
+
 	size_t txtsize = main_txt_eaddr - main_txt_saddr;
+	if (packer_type == "enigma")
+	{
+		txtsize += 0x1000;
+	}
+		
 	UINT8 *buf = (UINT8*)malloc(txtsize);
 	// buf has executable memory image
 	PIN_SafeCopy(buf, (VOID*)main_txt_saddr, txtsize);
@@ -278,25 +429,37 @@ bool FindIATArea_x64()
 	ADDRINT addr, i;
 	mod_info_t *mod;
 	for (size_t blk = 0; blk < txtsize; blk += 0x1000) {		
-		imp_list.clear();
-		// *fout << "# Block " << toHex(blk + main_txt_saddr) << endl;
+		imp_list.clear();		
 		for (i = 0; i < 0x1000; i += ADDRSIZE) {
 			bufp = buf + blk + i;
-			addr = TO_ADDRINT(bufp);
-			// *fout << "# " << toHex(bufp) << ' ' << toHex(addr) << endl;
+			addr = TO_ADDRINT(bufp);			
+
+#if TARGET_IA32
+			auto it = obfaddr2fn.find(addr);
+			// if target_addr is obfuscated function address
+			if (it != obfaddr2fn.end())
+			{
+				addr2fnaddr[addr] = it->second->saddr;
+				imp_list.push_back(it->second);
+				num_consecutive_not_imp_fn = 0;
+				num_imp_fn++;
+				continue;
+			}
+#endif
 			mod = GetModuleInfo(addr);			
 			if (addr == 0 || mod == NULL) {
 				if (++num_consecutive_not_imp_fn > 1) {
 					break;
 				}
 				imp_list.push_back(NULL);
+				continue;
 			}
-			else {
-				num_consecutive_not_imp_fn = 0;
-				num_imp_fn++;				
-				imp_list.push_back(GetFunctionInfo(addr));
-			}			
+
+			num_consecutive_not_imp_fn = 0;
+			num_imp_fn++;
+			imp_list.push_back(GetFunctionInfo(addr));			
 		}
+
 		if (num_imp_fn > 3) {	// assumption: at least 3 import function
 			imp_start_addr = main_txt_saddr + blk;
 			imp_end_addr = main_txt_saddr + blk + i;
@@ -358,30 +521,29 @@ free_buf:
 	return retVal;
 }
 
-// Check External Reference from main image address for x64
-void PrintIATArea_x64()
+// Check External Reference from main image address
+void PrintIATArea()
 {
-	size_t blksize = GetSectionInfo(imp_start_addr)->eaddr - imp_start_addr;	
-	UINT8 *buf = (UINT8*)malloc(blksize);
-	PIN_SafeCopy(buf, (VOID*)imp_start_addr, blksize);
-		
-	// print IAT information if IAT is found
-	
+
+	// print IAT information if IAT is found (themida x64)
 	if (found_IAT) {
 		ADDRINT addr;
 		*fout << "IAT START: " << toHex(imp_start_addr - main_img_saddr) << endl;
-		*fout << "IAT SIZE: " << toHex((imp_end_addr - imp_start_addr) / ADDRSIZE) << endl;
 		addr = imp_start_addr;
 		for (fn_info_t *fn : imp_list) {
 			if (fn != NULL) {
-				*fout << toHex(addr) << "\taddr\t" << fn->module_name << '\t' << fn->name << endl;
+				*fout << toHex(addr - main_img_saddr) << "\taddr\t" << fn->module_name << '\t' << fn->name << endl;
 			}			
 			addr += ADDRSIZE;
 		}
-		free(buf);
+		*fout << "IAT SIZE: " << toHex((addr - imp_start_addr) / ADDRSIZE) << endl;
 		return;
 	}
-	
+
+	size_t blksize = GetSectionInfo(imp_start_addr)->eaddr - imp_start_addr;
+	UINT8 *buf = (UINT8*)malloc(blksize);
+	PIN_SafeCopy(buf, (VOID*)imp_start_addr, blksize);
+
 	// Build sorted_api_map to gather functions per dll: function name -> fninfo. 
 	map<string, fn_info_t*> sorted_api_map;
 	for (auto it = obfaddr2fn.begin(); it != obfaddr2fn.end(); it++) {
@@ -395,10 +557,14 @@ void PrintIATArea_x64()
 	ADDRINT rel_addr = 0;
 	size_t idx = 0;
 	vector<pair<ADDRINT, fn_info_t*>> result_vec;
+	string prev_mod_name = "";
 	for (auto it = sorted_api_map.begin(); it != sorted_api_map.end(); it++, idx++) {	
 		// assign resolved function address to candidate IAT area
-		fn_info_t *fninfo = it->second;
+		fn_info_t *fninfo = it->second;		
 		result_vec.push_back(make_pair(current_addr - main_img_saddr, it->second));
+		current_addr += ADDRSIZE;
+		if (fninfo && prev_mod_name != fninfo->module_name) current_addr += ADDRSIZE;
+		prev_mod_name = fninfo->module_name;
 	}
 
 	// print IAT info
@@ -413,7 +579,7 @@ void PrintIATArea_x64()
 
 
 // API Detect executable trace analysis function
-void TRC_analysis_x64(CONTEXT *ctxt, ADDRINT addr, THREADID threadid)
+void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid)
 {	
 	if (threadid != 0) return;
 	
@@ -441,14 +607,18 @@ void TRC_analysis_x64(CONTEXT *ctxt, ADDRINT addr, THREADID threadid)
 		// These obfuscated instructions end by 'RET' instruction 
 		// that jumps into API function code
 
+		ADDRINT caller_addr = current_obfuscated_call->srcaddr;
+		ADDRINT prev_addr = 0;
+
 		UINT8 buf[8];		
 		ADDRINT stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);		
 		PIN_SafeCopy(buf, (VOID*)stkptr, 8);
 
 		traceAddrSeq.push_back(addr);
+		traceSPSeq.push_back(stkptr);
 
 #if LOG_CALL_CHECK == 1
-		*fout << "# -- " << toHex(addr) << " # " << traceAddrSeq.size() << endl;
+		* fout << "# CheckAPI running " << toHex(addr) << ' ' << GetAddrInfo(addr) << " # " << traceAddrSeq.size() << endl;
 #endif
 
 		if (traceAddrSeq.size() > 100)
@@ -470,27 +640,107 @@ void TRC_analysis_x64(CONTEXT *ctxt, ADDRINT addr, THREADID threadid)
 		fn_info_t *fninfo = GetFunctionInfo(addr);
 
 		if (fninfo == NULL) return;
+
+		// skip user exception by false positive find api calls
+		if (fninfo->name.find("KiUserExceptionDispatcher") != string::npos)
+		{
+			isCheckAPIStart = true;
+			isCheckAPIRunning = false;
+			goto check_api_start;
+		}
+
+		if (packer_type == "themida" || packer_type == "enigma")
+		{
+			if (TO_ADDRINT(buf) == current_callnextaddr) {
+
+				*fout << toHex(current_calladdr - main_img_saddr) << "\tcall\t";
+			}
+			else {
+				*fout << toHex(current_calladdr - main_img_saddr) << "\tgoto\t";
+			}
+
+			*fout << fninfo->module_name << '\t' << fninfo->name << endl;
+
+			obfaddr2fn[current_obf_fn_addr] = fninfo;
+
+			isCheckAPIStart = true;
+			isCheckAPIRunning = false;
+			goto check_api_start;
+		}
+		else if (packer_type == "vmp")
+		{
+			// Check call/jmp
+			// Compare stack top to check the return address which points to the next to the caller instruction. 		
+			PIN_SafeCopy((VOID*)memory_buffer, (VOID*)stkptr, ADDRSIZE);
+			ADDRINT stk_top_value = TO_ADDRINT(memory_buffer);
+			ADDRINT original_addr;
+			ADDRINT adjusted_caller_addr;
+			string call_type;
+
+			INT32 stk_diff = traceSPSeq[0] - stkptr;
+			if (stk_diff != 0 && stk_diff != ADDRSIZE && stk_diff != -ADDRSIZE)
+			{
+				isCheckAPIStart = true;
+				isCheckAPIRunning = false;
+				goto check_api_start;
+			}
+
+			original_addr = caller_addr;
+
+			if (stk_top_value == caller_addr + 5 || stk_top_value == caller_addr + 6) {
+				call_type = "call";
+				if (stk_diff == ADDRSIZE)
+				{
+					adjusted_caller_addr = caller_addr;
+				}
+				else if (stk_diff == 0)
+				{
+					adjusted_caller_addr = caller_addr - 1;
+				}
+				else
+				{
+					isCheckAPIStart = true;
+					isCheckAPIRunning = false;
+					goto check_api_start;
+				}
+			}
+			else
+			{
+				call_type = "goto";
+				if (stk_diff == 0)
+				{
+					adjusted_caller_addr = caller_addr;
+				}
+				else if (stk_diff == -ADDRSIZE)
+				{
+					adjusted_caller_addr = caller_addr - current_obfuscated_call->prev_push_inst_size;
+				}
+				else
+				{
+					isCheckAPIStart = true;
+					isCheckAPIRunning = false;
+					goto check_api_start;
+				}
+			}
+
 #if LOG_CALL_CHECK == 1
-		*fout << "# -- " << *fninfo << endl;
+			* fout << "# Caller address: " << toHex(caller_addr) << endl;
+			*fout << "# return address: " << toHex(stk_top_value) << endl;
+			*fout << "# next to Caller address: " << toHex(trace_next_addr_m[caller_addr]) << endl;
+			*fout << "# SP before call: " << toHex(traceSPSeq[0]) << endl;
+			*fout << "# SP at API function: " << toHex(stkptr) << endl;
+			*fout << "# call type: " << call_type << endl;
 #endif
 
-		if (fninfo->name == "KiUserExceptionDispatcher") return;
+			*fout << toHex(adjusted_caller_addr - main_img_saddr) << '\t' << call_type << '\t' << fninfo->module_name << '\t' << fninfo->name << endl;
+			obfaddr2fn[current_obf_fn_addr] = fninfo;
 
-		if (TO_ADDRINT(buf) == current_callnextaddr) {
+			isCheckAPIStart = true;
+			isCheckAPIRunning = false;
+			goto check_api_start;
 
-			*fout << toHex(current_calladdr - main_img_saddr) << "\tcall\t";
 		}
-		else {
-			*fout << toHex(current_calladdr - main_img_saddr) << "\tgoto\t";
-		}
-
-		*fout << fninfo->module_name << '\t' << fninfo->name << endl;
-
-		obfaddr2fn[current_obf_fn_addr] = fninfo;
 		
-		isCheckAPIStart = true;
-		isCheckAPIRunning = false;
-		goto check_api_start;
 	}
 
 check_api_start:
@@ -498,22 +748,44 @@ check_api_start:
 	// check whether the execution trace go into API function.
 	// Therefore IP is changed into obfuscated function call one by one
 	if (isCheckAPIStart) {
+
+
+		// register context save & restore
+		if (isRegSaved) {
+			restore_regs(ctxt);
+		}
+		else {
+			save_regs(ctxt);
+			isRegSaved = true;
+		}
+
 		// *fout << "# current function: " << current_obf_fn_pos << '/' << obf_call_candidate_addrs.size() << endl;
 		if (current_obf_fn_pos == obf_call_candidate_addrs.size()) {
 			// when checking obfuscated call finished, prepare the end 
 			isCheckAPIStart = false;
 			isCheckAPIEnd = true;
+#if LOG_CALL_CHECK == 1
+			* fout << "# Checking End " << current_obf_fn_pos << endl;
+#endif
 			goto check_api_end;
 		}
-		obf_call_t addrp = obf_call_candidate_addrs.at(current_obf_fn_pos++);
-		ADDRINT calladdr = addrp.srcaddr;
-		ADDRINT tgtaddr = addrp.dstaddr;
+		obf_call_t *addrp = &obf_call_candidate_addrs.at(current_obf_fn_pos++);
+		ADDRINT calladdr = addrp->srcaddr;
+		ADDRINT tgtaddr = addrp->dstaddr;
 		
+#if LOG_CALL_CHECK == 1
+		* fout << "# Checking : " << toHex(addrp->srcaddr) << ' ' << current_obf_fn_pos << '/' << obf_call_candidate_addrs.size() << endl;
+#endif
+		traceAddrSeq.clear();
+		traceSPSeq.clear();
+		movRegApiFnAddrs.clear();
+
 		// currently call instruction is of the form 'E8 __ __ __ __' which is 5 bytes
 		// but originally it is 'FF 15 __ __ __ __' or 'FF 25 __ __ __ __' which is 6 bytes
 		// so next instruction address is addr + 6
 		current_calladdr = calladdr;
 		current_callnextaddr = calladdr + 6;
+		current_obfuscated_call = addrp;
 
 		isCheckAPIStart = false;
 		isCheckAPIRunning = true;
@@ -538,9 +810,6 @@ check_api_start:
 			PIN_SafeCopy((VOID*)tmpaddr, buf, 8);
 		}
 		*/
-#if LOG_CALL_CHECK == 1
-		*fout << "# Obfuscated Call Candidate:" << toHex(calladdr) << endl;
-#endif
 		PIN_SetContextReg(ctxt, REG_INST_PTR, calladdr);
 		PIN_ExecuteAt(ctxt);
 	}
@@ -558,21 +827,19 @@ check_api_end:
 	}
 }
 
-// EXE INS memory write analysis function 
-void INS_MW_analysis_x64(ADDRINT targetAddr)
-{
-	set_mwblock(targetAddr);
-}
-
 // API Detect executable trace instrumentation function
-void TRC_inst_x64(TRACE trace, void *v)
+void TRC_inst(TRACE trace, void *v)
 {
 	ADDRINT addr = TRACE_Address(trace);
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)TRC_analysis_x64,
+	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)TRC_analysis,
 		IARG_CONTEXT,
 		IARG_ADDRINT, addr,
 		IARG_THREAD_ID,
 		IARG_END);
+
+	trace_cache_m[addr] = new vector<ADDRINT>;
+	trace_next_addr_m[addr] = addr + TRACE_Size(trace);
+
 
 #if DEBUG == 1
 	if (addr >= main_img_saddr && addr < main_img_eaddr) {
@@ -660,177 +927,6 @@ void FixCall()
 }
 
 
-// Check External Reference from main image address for x86
-void PrintIATArea_x86()
-{
-	size_t imgsize = main_img_eaddr - main_img_saddr;
-	UINT8 *buf = (UINT8*)malloc(imgsize);
-	UINT8 *bufp;
-	size_t idx;
-	ADDRINT addr, target_addr, blk_addr;
-	size_t num_fnaddrs, num_nonfnaddrs;
-	ADDRINT iat_start_addr = 0, iat_end_addr = 0, iat_size = 0;
-	string current_section = "";
-
-	unsigned char* pc = reinterpret_cast<unsigned char*>(main_img_saddr);
-	
-	// buf has executable memory image
-	PIN_SafeCopy(buf, pc, imgsize);
-
-	// skip alignment error
-	if (main_img_saddr % 0x1000) goto free_buf;
-
-	// dump each section
-	if (isMemDump) dump_memory();
-
-#if DEBUG == 1
-	*fout << "obfaddr size: " << obfaddr2fn.size() << endl;
-	for (auto it = obfaddr2fn.begin(); it != obfaddr2fn.end(); it++)
-	{
-		*fout << toHex(it->first) << " -> " << it->second << endl;
-	}
-	
-	*fout << "\n\nmemory dump" << endl;
-	for (idx = 0; idx < imgsize; idx+= 4)
-	{
-		bufp = buf + idx;
-		if (idx % 16 == 0) *fout << toHex(main_img_saddr + idx) << ' ';
-		*fout << toHex(MakeADDR(bufp)) << ' ';			
-		if (idx % 16 == 12) *fout << endl;
-	}
-#endif
-	
-	// search for Import Address Table 	
-	ADDRINT idx_end = main_txt_eaddr - main_txt_saddr;
-	if (packer_type == "enigma")
-	{
-		idx_end += 0x1000;
-	}
-	//else if (packer_type == "themida")
-	//{
-
-	//}
-#if DEBUG == 2
-	*fout << "Searching for IAT " << toHex(obf_txt_saddr) << ' ' << toHex(obf_txt_eaddr) << endl;
-#endif
-	
-	for (idx = 0x1000; idx < idx_end; idx += 0x1000)
-	{				
-		blk_addr = main_txt_saddr + idx;
-		addr2fnaddr.clear();		
-		num_fnaddrs = 0;
-		num_nonfnaddrs = 0;
-
-#if DEBUG == 2
-		* fout << "Checking Block: " << toHex(blk_addr) << endl;
-#endif
-
-		for (addr = blk_addr, bufp = buf + idx + (main_txt_saddr - main_img_saddr); 
-			addr < blk_addr + 0x1000; 
-			addr += ADDRSIZE, bufp += ADDRSIZE)
-		{			
-			// target_addr : memory value at 'addr'						
-			target_addr = TO_ADDRINT(bufp);
-#if DEBUG == 2
-			*fout << toHex(addr) << ' ' << toHex(target_addr) << ' ';
-#endif
-			auto it = obfaddr2fn.find(target_addr);
-			// if target_addr is obfuscated function address
-			if (it != obfaddr2fn.end())
-			{				
-				addr2fnaddr[addr] = it->second->saddr;
-				if (num_fnaddrs == 0) iat_start_addr = addr;
-				num_fnaddrs++;
-				iat_end_addr = addr;
-#if DEBUG == 2
-				*fout << "<- obfuscated api function" << endl;
-#endif
-			}
-			else if (GetFunctionInfo(target_addr) != NULL)
-			{
-				addr2fnaddr[addr] = target_addr;
-				if (num_fnaddrs == 0) iat_start_addr = addr;
-				num_fnaddrs++;
-				iat_end_addr = addr;
-#if DEBUG == 2
-				*fout << "<- api function" << endl;
-#endif
-			}
-			else if (target_addr == 0 || target_addr == 0xFFFFFFFF)
-			{
-#if DEBUG == 2
-				* fout << "<- separator" << endl;
-#endif				
-			}
-			else {
-#if DEBUG == 2
-				*fout << "<- don't know" << endl;
-#endif
-				if (num_fnaddrs > 3) {
-					num_nonfnaddrs++;
-					if (num_nonfnaddrs > 3) {
-						iat_size = iat_end_addr - iat_start_addr + ADDRSIZE;
-						goto found_iat;
-					}
-				}
-				else {
-					num_fnaddrs = 0;
-					num_nonfnaddrs = 0;
-					iat_start_addr = 0;
-				}
-			}
-		}
-	}
-
-	// no IAT	
-	goto call_modification;
-
-found_iat:
-	// record IAT deobfuscation information
-	// We should modify IAT because of the following code pattern
-	//
-	// MOV ESI, DWORD [IAT entry address]
-	// ...
-	// CALL ESI
-	// 
-	if (iat_start_addr != 0) {
-		*fout << "IAT START: " << toHex(iat_start_addr - main_img_saddr) << endl;
-		*fout << "IAT SIZE: " << toHex(iat_size) << endl;
-	}
-	else {
-		*fout << "IAT START: ?" << endl;
-		*fout << "IAT SIZE: ?" << toHex(iat_size) << endl;
-
-	}
-
-	//// obfuscated API
-	//for (auto it = iataddr2obffnaddr.begin(); it != iataddr2obffnaddr.end(); it++)
-	//{					
-	//	ADDRINT srcaddr = it->first;
-	//	ADDRINT dstaddr = it->second;
-	//	fn_info_t *dstfn = obfaddr2fn[dstaddr];
-	//	if (dstfn == NULL) *fout << toHex(srcaddr - obf_img_saddr) << "\taddr " << toHex(dstaddr) << endl;
-	//	*fout << toHex(srcaddr - obf_img_saddr) << "\taddr " << dstfn->module_name << '\t' << dstfn->name << endl;
-	//}
-
-	// IAT information
-	for (auto it = addr2fnaddr.begin(); it != addr2fnaddr.end(); it++)
-	{					
-		ADDRINT srcaddr = it->first;
-		ADDRINT dstaddr = it->second;
-		fn_info_t *dstfn = GetFunctionInfo(dstaddr);
-		if (dstfn == NULL) *fout << toHex(srcaddr - main_img_saddr) << "\taddr " << toHex(dstaddr) << endl;
-		else *fout << toHex(srcaddr - main_img_saddr) << "\taddr " << dstfn->module_name << '\t' << dstfn->name << endl;		
-	}
-
-call_modification:
-		
-free_buf:
-	free(buf);
-
-}
-
-
 /// <summary> Instrument instructions. </summary>
 void INS_inst(INS ins, void *v)
 {
@@ -839,11 +935,14 @@ void INS_inst(INS ins, void *v)
 	{
 		if (addr == obf_dll_entry_addr) {
 			is_unpack_started = true;
+			LOG("Unpack Started.\n");
 		}
 		if (!is_unpack_started) return;
 	}
 
-	INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)INS_analysis,
+	INS_InsertCall(ins, IPOINT_BEFORE, 
+		(AFUNPTR)INS_analysis,
+		IARG_CONTEXT, 
 		IARG_ADDRINT, addr,
 		IARG_THREAD_ID,
 		IARG_END);
@@ -870,75 +969,43 @@ void INS_inst(INS ins, void *v)
 				IARG_END);
 		}
 	}
-
-	// OEP detection for EXE and
-	// DLL unpack finish detection for DLL	
-	if (isDLLAnalysis)
-	{
-		// DLL unpack detection
-		if (addr == obf_dll_entry_addr) {
-			is_unpack_started = true;
-		}
-
-		// Unpacking DLL is done after executing DLLEntry. 
-		// After DLLEntry function is executed, return to DLL Loader or the DllMain in the text section is executed. 
-		if (is_unpack_started && ((addr >= loader_saddr && addr < loader_eaddr) || (addr >= main_txt_saddr && addr < main_txt_eaddr)))
-		{
-			PrintIATArea_x86();
-			((ofstream*)fout)->close();
-			PIN_ExitProcess(-1);
-		}
-	}
-	else
-	{
-		// OEP and near OEP detection
-		if (addr >= main_txt_saddr && addr < main_txt_eaddr)
-		{
-			// find OEP and then near OEP
-			// Debugger stops when HWBP is set on OEP
-			// but HWBP on near OEP works well
-			if (oep == 0) {
-				set_meblock(addr);
-				if (get_mwblock(addr) && get_meblock(addr) == 1)
-				{
-					oep = addr;
-					*fout << "OEP:" << toHex(oep - main_img_saddr) << endl;
-
-					PIN_SemaphoreSet(&sem_oep_found);
-					LOG("Set sem_oep_found\n");
-					LOG("Waiting sem_unpack_finished\n");
-					PIN_SemaphoreWait(&sem_unpack_finished);
-					LOG("Waiting sem_dump_finished\n");
-					PIN_SemaphoreWait(&sem_dump_finished);
-				}
-			}
-			// near OEP is the address of the first call instruction 
-			else {
-				ADDRINT taddr = INS_Address(ins);
-				if (taddr < main_txt_saddr || taddr > main_txt_eaddr) return;
-				if (INS_IsCall(ins)) {
-					oep = addr;
-					*fout << "NEAR OEP:" << toHex(oep - main_img_saddr) << endl;
-
-					// CheckExportFunctions_x86();
-					
-
-					((ofstream*)fout)->close();
-					PIN_ExitProcess(-1);
-				}
-			}
-			return;
-		}
-	}
 }
 
 
 
 // INS analysis function
 // Just record previous address
-void INS_analysis(ADDRINT addr, THREADID tid)
+void INS_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID tid)
 {
 	if (tid != 0) return;
+	// Check OEP
+	if (oep == 0)
+	{		
+		// if (isDLLAnalysis)
+		// {
+		// 	// Unpacking DLL is done after executing DLLEntry. 
+		// 	// After DLLEntry function is executed, return to DLL Loader or the DllMain in the text section is executed. 
+		// 	if (is_unpack_started && ((addr >= loader_saddr && addr < loader_eaddr) || (addr >= main_txt_saddr && addr < main_txt_eaddr)))
+		// 	{
+		// 		PrintIATArea();
+		// 		((ofstream*)fout)->close();
+		// 		PIN_ExitProcess(-1);
+		// 	}
+		// }
+		
+		set_meblock(addr);
+		if (addr >= main_txt_saddr && addr < main_txt_eaddr)
+		{
+			if (get_mwblock(addr) && get_meblock(addr) == 1)
+			{
+				oep = addr;
+				*fout << "OEP:" << toHex(oep - main_img_saddr) << endl;
+				PIN_SaveContext(ctxt, &ctx0);
+				PIN_SemaphoreSet(&sem_oep_found);
+			}
+			return;
+		}
+	}
 }
 
 
@@ -951,20 +1018,16 @@ void INS_MW_analysis(size_t mSize, ADDRINT targetAddr)
 	if (isDLLAnalysis && targetAddr >= main_img_saddr && targetAddr < main_img_eaddr) return;
 
 	if (GetModuleInfo(targetAddr) != NULL) return;
-	if (targetAddr >= main_img_saddr && targetAddr < main_img_eaddr) return;
+	if (targetAddr >= main_img_saddr && targetAddr < main_txt_eaddr) return;
 
 	for (size_t i = 0; i < mSize; i++)
 	{
 		obfaddr2fn[targetAddr + i] = current_obf_fn;
 	}
 
-#if DEBUG == 1
-	fn_info_t *finfo = GetFunctionInfo(targetAddr);
-	if (finfo != NULL)
-	{
-		*fout << "API Function Write: " << *current_obf_fn << endl;
-	}
-#endif	
+#if DEBUG == 2
+	*fout << "Write: " << toHex(targetAddr) << ' ' << *current_obf_fn << endl;
+#endif
 }
 
 // EXE INS memory read analysis function 
@@ -973,6 +1036,9 @@ void INS_MR_analysis(ADDRINT targetAddr)
 	fn_info_t *finfo = GetFunctionInfo(targetAddr);
 	if (finfo == NULL) return;
 	current_obf_fn = finfo;
+#if DEBUG == 2
+	*fout << "API Read: " << toHex(targetAddr) << ' ' << *current_obf_fn << endl;
+#endif
 }
 
 
@@ -1073,6 +1139,9 @@ void IMG_inst(IMG img, void *v)
 			for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn))
 			{
 				string rtnname = RTN_Name(rtn);
+
+				if (rtnname == ".text") continue;
+
 				ADDRINT saddr = RTN_Address(rtn);
 				ADDRINT eaddr = saddr + RTN_Range(rtn);
 				fn_info_t *fninfo = new fn_info_t(imgname, rtnname, saddr, eaddr);
@@ -1096,172 +1165,6 @@ void IMG_inst(IMG img, void *v)
 	}
 
 }
-
-// TRACE instrumentation function for DLL files
-void DLL64_TRC_inst(TRACE trace, void *v)
-{
-	ADDRINT addr = TRACE_Address(trace);
-
-	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)DLL64_TRC_analysis,
-		IARG_CONTEXT,
-		IARG_ADDRINT, addr,
-		IARG_THREAD_ID,
-		IARG_END);
-
-	if (addr == obf_dll_entry_addr) {
-		is_unpack_started = true;
-	}
-
-	if (is_unpack_started && addr >= loader_saddr && addr < loader_eaddr)
-	{
-		FindObfuscatedAPICalls();
-		isCheckAPIStart = true;
-	}
-}
-
-// DLL trace analysis function 
-// check whether unpacking process end
-void DLL64_TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid)
-{
-	if (threadid != 0) return;
-
-	if (isCheckAPIRunning) {
-		// if obfuscated API checking is started and 
-		// if the trace is in another section
-		// then here is the obfuscated instructions that resolve 'call API_function'
-		// These obfuscated instructions end by 'RET' instruction 
-		// that jumps into API function code
-
-		UINT8 buf[8];
-		ADDRINT stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);
-		PIN_SafeCopy(buf, (VOID*)stkptr, 8);
-		traceAddrSeq.push_back(addr);
-		if (traceAddrSeq.size() > 20)
-		{
-			isCheckAPIStart = true;
-			isCheckAPIRunning = false;
-			goto check_api_start;
-		}
-		if (addr > main_txt_eaddr && addr < main_img_eaddr) {
-			// DO NOTHING inside Themida section
-			return;
-		}
-
-		// if the trace in in API function
-		// then here is the API function. 
-		// Check the stack top value whether the value is next address of the call instruction. 
-		fn_info_t *fninfo = GetFunctionInfo(addr);
-		if (fninfo == NULL) return;
-		if (fninfo->name == "KiUserExceptionDispatcher") return;
-
-		if (TO_ADDRINT(buf) == current_callnextaddr) {
-
-			*fout << toHex(current_calladdr - main_img_saddr) << "\tcall\t";
-		}
-		else {
-			*fout << toHex(current_calladdr - main_img_saddr) << "\tgoto\t";
-		}
-
-		*fout << fninfo->module_name << '\t' << fninfo->name << endl;
-
-		obfaddr2fn[current_obf_fn_addr] = fninfo;
-
-		isCheckAPIStart = true;
-		isCheckAPIRunning = false;
-		goto check_api_start;
-	}
-
-check_api_start:
-	// For each obfuscated call instruction,
-	// check whether the execution trace go into API function.
-	// Therefore IP is changed into obfuscated function call one by one
-	if (isCheckAPIStart) {
-		if (current_obf_fn_pos == obf_call_candidate_addrs.size()) {
-			// when checking obfuscated call finished, prepare the end 
-			isCheckAPIStart = false;
-			isCheckAPIEnd = true;
-			goto check_api_end;
-		}
-		auto addrp = obf_call_candidate_addrs.at(current_obf_fn_pos++);
-		ADDRINT calladdr = addrp.srcaddr;
-		ADDRINT tgtaddr = addrp.dstaddr;
-
-		// currently call instruction is of the form 'E8 __ __ __ __' which is 5 bytes
-		// but originally it is 'FF 15 __ __ __ __' or 'FF 25 __ __ __ __' which is 6 bytes
-		// so next instruction address is addr + 6
-		current_calladdr = calladdr;
-		current_callnextaddr = calladdr + 6;
-
-		isCheckAPIStart = false;
-		isCheckAPIRunning = true;
-		traceAddrSeq.clear();
-
-		current_obf_fn_addr = tgtaddr;
-
-		// change IP to obfuscated function call target. 
-		PIN_SetContextReg(ctxt, REG_INST_PTR, calladdr);
-		PIN_ExecuteAt(ctxt);
-	}
-
-check_api_end:
-	if (isCheckAPIEnd) {
-		// after checking obfuscated calls, find export calls and terminate.
-		*fout << "# check api end" << endl;
-		PrintIATArea_x64();
-		((ofstream*)fout)->close();
-		PIN_ExitProcess(-1);
-	}
-}
-
-// Fix IAT after run-until-API methods
-void DLL64_FixIAT() {
-
-}
-
-// Find API Calls (~= External References) from main image address for x86/64 DLL
-void DLL_FindAPICalls()
-{
-	size_t txtsize = main_txt_eaddr - main_txt_saddr;;
-	UINT8 *buf = (UINT8*)malloc(txtsize);
-	size_t idx;
-	ADDRINT addr, target_addr;
-	ADDRINT iat_start_addr = 0, iat_size = 0;
-
-	unsigned char* pc = reinterpret_cast<unsigned char*>(main_txt_saddr);
-
-	// buf has executable memory image
-	EXCEPTION_INFO *pExinfo = NULL;
-	size_t numcopied = PIN_SafeCopyEx(buf, pc, txtsize, pExinfo);
-
-	// search for address modification in program
-
-	for (idx = 0; idx < numcopied; idx++)
-	{
-		// CALL r/m32 (FF 1F __ __ __ __)
-		// is patched by Themida64 into
-		// CALL rel32; db 00 (E8 __ __ __ __ ; 00)
-		if (buf[idx] == 0xE8 && buf[idx + 5] == 0x00)
-		{
-			addr = main_txt_saddr + idx;
-			target_addr = addr + 5 + buf[idx + 1] + (buf[idx + 2] << 8) + (buf[idx + 3] << 16) + (buf[idx + 4] << 24);
-			sec_info_t *current_section = GetSectionInfo(addr);
-			sec_info_t *target_section = GetSectionInfo(target_addr);
-
-			if (current_section == NULL || target_section == NULL) continue;
-
-			// obfuscated call target is selected by 
-			// - call targets into other section of the main executables
-			if (current_section->module_name == target_section->module_name &&
-				current_section->saddr != target_section->saddr) {
-				// *fout << "Obfuscated Call : " << toHex(addr) << " -> " << toHex(target_addr) << endl;
-				// obf_call_candidate_addrs.push_back(make_pair(addr, target_addr));
-				obf_call_candidate_addrs.push_back(obf_call_t(addr, target_addr, INDIRECT_CALL, ""));
-			}
-		}
-	}
-	free(buf);
-}
-
 
 // This routine is executed every time a thread is created.
 VOID ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v)
@@ -1313,44 +1216,44 @@ VOID unpack_thread(VOID *arg)
 
 	// Search for obfuscated API calls.
 	LOG(msg_hdr + "Searching for obfuscated calls.\n");
-	FindObfuscatedAPICalls();	
+	FindObfuscatedAPICalls();
 #if LOG_CALL_CHECK == 1
-	*fout << "Obfuscated Call Candidates:" << endl;
-	*fout << "------------------------------" << endl;
+	*fout << "# Obfuscated Call Candidates:" << endl;
+	*fout << "# ------------------------------" << endl;
 	for (auto e : obf_call_candidate_addrs) {
-		*fout << e << endl;
+		*fout << "# " << e << endl;
 	}
 	*fout << endl;
 #endif
 
-	// Resolve obfuscated API calls
-	LOG(msg_hdr + "Resolving obfuscated API Calls.\n");
-	if (ADDRSIZE == 8)
-	{
+	if (packer_type == "vmp" || (packer_type == "themida" && ADDRSIZE == 8)) {
+		// Resolve obfuscated API calls for x64
+		LOG(msg_hdr + "Resolving obfuscated API Calls.\n");
 		current_resolve_api = 0;
-		isCheckAPIStart = true;		
+		isCheckAPIStart = true;
 		PIN_SemaphoreWait(&sem_resolve_api_end);
 	}	
 
 	// Search for IAT area.
-	if (ADDRSIZE == 8) {
-		LOG(msg_hdr + "Searching for IAT Area.\n");
-		bool isIAT = FindIATArea_x64();
-		if (!isIAT)
-		{
-			LOG(msg_hdr + "Cannot find an IAT are condidate in the binary.\n");
-		}
+	LOG(msg_hdr + "Searching for IAT Area.\n");
+	bool isIAT = FindIATArea();
+	if (!isIAT)
+	{
+		LOG(msg_hdr + "Cannot find an IAT are condidate in the binary.\n");
 	}
 	
 	// api patch	
 	LOG(msg_hdr + "Searching for an export area.\n");
+
+	PrintIATArea();
+/*
 	if (ADDRSIZE == 4) {
 		PrintIATArea_x86();
 	}
 	else {
 		PrintIATArea_x64();
 	}
-	
+	*/
 	LOG(msg_hdr + "Fixing IAT.\n");
 	FixIAT();
 	LOG(msg_hdr + "Fixing obfuscated calls.\n");
@@ -1423,13 +1326,13 @@ int main(int argc, char *argv[])
 	IMG_AddInstrumentFunction(IMG_inst, 0);
 
 	// Register function to be called to instrument traces
-#ifdef TARGET_IA32
-	// for 32 bit executable file
-	INS_AddInstrumentFunction(INS_inst, 0);
-#elif TARGET_IA32E
-	// for 64 bit executable file 
-	TRACE_AddInstrumentFunction(TRC_inst_x64, 0);
-#endif
+	if (packer_type == "vmp") {
+		TRACE_AddInstrumentFunction(TRC_inst, 0);
+	}
+	else if (packer_type == "themida" || packer_type == "enigma") {
+		if (ADDRSIZE == 4) INS_AddInstrumentFunction(INS_inst, 0);
+		else if (ADDRSIZE == 8) TRACE_AddInstrumentFunction(TRC_inst, 0);
+	}
 
 	// Register function to be called when the application exits
 	PIN_AddFiniFunction(Fini, 0);
