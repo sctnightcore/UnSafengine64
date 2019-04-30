@@ -11,6 +11,7 @@ using namespace std;
 /* ===================================================================== */
 KNOB<string> KnobOutputFile(KNOB_MODE_WRITEONCE, "pintool", "o", "result.txt", "specify file name for the result");
 KNOB<string> KnobMemoryTrace(KNOB_MODE_WRITEONCE, "pintool", "mem", "", "specify whether to trace memory read(r), write(w), read/write(rw)");
+KNOB<bool> KnobBlockTrace(KNOB_MODE_WRITEONCE, "pintool", "bb", "", "specify whether to trace basic blocks execution");
 KNOB<bool> KnobInstructionTrace(KNOB_MODE_WRITEONCE, "pintool", "ins", "0", "instruction trace");
 KNOB<string> KnobTraceStartAddr(KNOB_MODE_WRITEONCE, "pintool", "saddr", "0", "instruction trace start address");
 KNOB<string> KnobTraceEndAddr(KNOB_MODE_WRITEONCE, "pintool", "eaddr", "0", "instruction trace end address");
@@ -20,6 +21,134 @@ KNOB<bool> KnobDumpCode(KNOB_MODE_WRITEONCE, "pintool", "dumpcode", "0", "dump c
 //KNOB<bool> KnobFindHandlerAddress(KNOB_MODE_WRITEONCE, "pintool", "1", "1", "1st step: find handler candidate addresses");
 KNOB<bool> KnobFindHandlerAddress(KNOB_MODE_WRITEONCE, "pintool", "1", "0", "1st step: find handler candidate addresses");
 KNOB<bool> KnobFindRegisterMemoryMapping(KNOB_MODE_WRITEONCE, "pintool", "map_reg_mem", "0", "Find mapping from registers to memory location");
+
+
+// Block Trace Functions
+void EXE_TRC_Blk_Inst(TRACE trace, void *v)
+{
+	ADDRINT addr = TRACE_Address(trace);
+
+	// skip dll module
+	mod_info_t *minfo = GetModuleInfo(addr);
+	mod_info_t *prevminfo = prevmod;
+	prevmod = minfo;
+	if (minfo == NULL) return;
+	if (minfo->isDLL() && prevminfo != NULL && prevminfo->isDLL()) return;
+
+	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl)) {		
+		size_t bbl_size = BBL_Size(bbl);
+
+		BBL_InsertCall(bbl, IPOINT_BEFORE, (AFUNPTR)EXE_BBL_Analysis, 
+			IARG_ADDRINT, addr,
+			IARG_ADDRINT, bbl_size,
+			IARG_THREAD_ID,
+			IARG_END);
+
+		if (addr < main_img_saddr || addr >= main_img_eaddr) continue;
+		
+		// print code cache
+		PIN_SafeCopy(buf, (VOID*)addr, bbl_size);
+
+		*fout << "C " << toHex(addr) << ' ' << toHex(bbl_size) << ' ';
+		for (auto i = 0; i < bbl_size; i++)
+		{
+			*fout << toHex1(buf[i]);
+		}
+		*fout << endl;
+
+		for (INS ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+		{
+			// log jmp dword ptr [...] instruction
+			if (INS_Opcode(ins) == XED_ICLASS_JMP && INS_OperandMemoryBaseReg(ins, 0))
+			{
+				ADDRINT addr = INS_Address(ins);
+
+				string disasm_code = INS_Disassemble(ins);
+				asmcode_m[addr] = disasm_code;
+
+				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_HandlerExit_Analysis,
+					IARG_ADDRINT, addr,
+					IARG_THREAD_ID,
+					IARG_END);
+			}
+
+			// Memory Read and Write
+			UINT32 memOperands = INS_MemoryOperandCount(ins);
+			for (UINT32 memOp = 0; memOp < memOperands; memOp++)
+			{
+				if (INS_MemoryOperandIsRead(ins, memOp) && !INS_IsStackRead(ins))
+				{
+					INS_InsertPredicatedCall(
+						ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_Memtrace_MR_analysis,
+						IARG_CONTEXT,
+						IARG_INST_PTR,
+						IARG_MEMORYREAD_SIZE,
+						IARG_MEMORYREAD_EA,
+						IARG_THREAD_ID,
+						IARG_BOOL, INS_IsStackRead(ins),
+						IARG_END);
+				}
+				if (INS_MemoryOperandIsWritten(ins, memOp) && !INS_IsStackWrite(ins))
+				{
+					INS_InsertPredicatedCall(
+						ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_Memtrace_MW_analysis,
+						IARG_CONTEXT,
+						IARG_INST_PTR,
+						IARG_MEMORYWRITE_SIZE,
+						IARG_MEMORYWRITE_EA,
+						IARG_THREAD_ID,
+						IARG_BOOL, INS_IsStackWrite(ins),
+						IARG_END);
+					INS_InsertPredicatedCall(
+						ins, IPOINT_AFTER, (AFUNPTR)EXE_INS_Memtrace_MW_after_analysis,
+						IARG_CONTEXT,
+						IARG_MEMORYWRITE_SIZE,
+						IARG_THREAD_ID,
+						IARG_BOOL, INS_IsStackWrite(ins),
+						IARG_END);
+				}
+			}
+		}
+	}
+}
+
+void EXE_BBL_Analysis(ADDRINT addr, ADDRINT size, THREADID threadid)
+{
+	mod_info_t *minfo = GetModuleInfo(addr);
+	if (minfo == NULL) return;
+	if (minfo->isDLL()) {
+		fn_info_t *finfo = GetFunctionInfo(addr);
+		if (finfo->saddr != addr) return;
+	}
+
+	PIN_GetLock(&lock, threadid + 1);
+	*fout << "B " << threadid << ' ' << toHex(addr) << ' ' << toHex(size) << ' ' << GetAddrInfo(addr) << endl;	
+	PIN_ReleaseLock(&lock);
+
+	//if (addr >= main_img_saddr && addr < main_img_eaddr)
+	//{		
+	//	// print threadid, trace address, trace size
+	//	PIN_GetLock(&lock, threadid + 1);
+	//	*fout << "B " << threadid << ' ' << toHex(addr) << ' ' << toHex(size) << endl;
+	//	PIN_ReleaseLock(&lock);
+	//}
+	//else
+	//{
+	//	// print function name
+	//	PIN_GetLock(&lock, threadid + 1);
+	//	*fout << "B " << threadid << ' ' << toHex(addr) << ' ' << GetAddrInfo(addr) << endl;
+	//	PIN_ReleaseLock(&lock);
+	//}
+}
+
+void EXE_INS_HandlerExit_Analysis(ADDRINT addr, THREADID tid)
+{
+	PIN_GetLock(&lock, tid + 1);
+	*fout << "HE " << tid << ' ' << toHex(addr) << ' ' << asmcode_m[addr] << endl;
+	PIN_ReleaseLock(&lock);
+}
+
+
 
 // ========================================================================================================================
 // Memory Trace Functions 
@@ -55,7 +184,7 @@ void EXE_TRC_Memtrc_analysis(ADDRINT addr, THREADID threadid)
 }
 
 // memory trace instrumentation function
-void EXE_TRC_MemTrace_Inst(TRACE trace, void *v)
+void EXE_TRC_MemTrace_inst(TRACE trace, void *v)
 {
 	ADDRINT addr = TRACE_Address(trace);
 
@@ -67,11 +196,11 @@ void EXE_TRC_MemTrace_Inst(TRACE trace, void *v)
 	if (minfo->isDLL() && prevminfo != NULL && prevminfo->isDLL()) return;
 
 	// avoid duplicated execution trace
-	if (!isInsTrace)
-		TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)EXE_TRC_Memtrc_analysis,
-			IARG_ADDRINT, addr,
-			IARG_THREAD_ID,
-			IARG_END);
+	//if (!isInsTrace)
+	//	TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)EXE_TRC_Memtrc_analysis,
+	//		IARG_ADDRINT, addr,
+	//		IARG_THREAD_ID,
+	//		IARG_END);
 
 	for (BBL bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
 	{
@@ -153,25 +282,25 @@ void EXE_INS_Memtrace_MW_analysis(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRI
 		return;
 	}
 
+	delayed_msg.str("");
 	delayed_msg.clear();
-	bool isFound = false;
-	if (op_cache_m.find(ip) != op_cache_m.end()) {
-		REG op1reg = op_cache_m[ip];
+	//bool isFound = false;
+	//if (op_cache_m.find(ip) != op_cache_m.end()) {
+	//	REG op1reg = op_cache_m[ip];
 
-		ADDRINT base_addr = PIN_GetContextReg(ctxt, op1reg);
-		if (base_addr == main_img_saddr) {
-			// UINT8 buf[ADDRSIZE];
-			PIN_SafeCopy(buf, (VOID*)targetAddr, ADDRSIZE);
-			ADDRINT haddr = BYTES_TO_ADDRINT(buf);
-			hdl_addr_m[targetAddr] = haddr + base_addr;
-			rev_hdl_addr_m[haddr + base_addr] = targetAddr;
-			// delayed_msg = "HDL";
-			isFound = true;
-		}
-	}
+	//	ADDRINT base_addr = PIN_GetContextReg(ctxt, op1reg);
+	//	if (base_addr == main_img_saddr) {			
+	//		PIN_SafeCopy(buf, (VOID*)targetAddr, ADDRSIZE);
+	//		ADDRINT haddr = TO_ADDRINT(buf);
+	//		hdl_addr_m[targetAddr] = haddr + base_addr;
+	//		rev_hdl_addr_m[haddr + base_addr] = targetAddr;
+	//		// delayed_msg = "HDL";
+	//		isFound = true;
+	//	}
+	//}
 
-	delayed_msg << toHex(ip) << " W:" << toHex(targetAddr);
-	if (isFound) delayed_msg << " HDL";
+	delayed_msg << "W " << threadid << ' ' << toHex(ip) << ' ' << toHex(targetAddr) << ' ' << mSize;
+	//if (isFound) delayed_msg << " HDL";
 	delayed_msg << ' ';
 
 	// PIN_GetLock(&lock, threadid + 1);
@@ -185,20 +314,20 @@ void EXE_INS_Memtrace_MW_after_analysis(CONTEXT *ctxt, size_t mSize, THREADID th
 {
 	if (is_stack && (mem_write_addr < main_img_saddr || mem_write_addr >= main_img_eaddr)) return;
 
-	string msg = "";
-	// UINT8 buf[ADDRSIZE];
+	string msg = "";	
 	PIN_SafeCopy(buf, (VOID*)mem_write_addr, mSize);
 	ADDRINT mem_value = buf2val(buf, mSize);		
+
+	delayed_msg << StringHex(mem_value, mSize * 2, false);
+	
 	ADDRINT ebp_val = PIN_GetContextReg(ctxt, REG_EBP);
 
 	ADDRDELTA diff = mem_write_addr - ebp_val;
 	if (ebp_val >= main_img_saddr && ebp_val < main_img_eaddr && diff >= 0 && diff <= 0xFF) {
 		// *fout << "EBP:" << toHex(ebp_val) << " DIFF:" << toHex1(diff) << ' ';
-		delayed_msg << "EBP:" << toHex(ebp_val) << " DIFF:" << toHex1(diff) << ' ';
+		delayed_msg << " # EBP:" << toHex(ebp_val) << " DIFF:" << toHex1(diff) << ' ';
 	}
 
-	delayed_msg <<  "V:" << StringHex(mem_value, mSize * 2, false);
-	
 	
 	// *fout << "V:" << StringHex(mem_value, mSize * 2, false);
 	
@@ -214,10 +343,10 @@ void EXE_INS_Memtrace_MR_analysis(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRI
 	if (is_stack && (targetAddr < main_img_saddr || targetAddr >= main_img_eaddr)) return;
 
 	string msg = "";
-	//if (hdl_addr_m.find(targetAddr) != hdl_addr_m.end()) {
-	//	msg = "HDL:" + toHex(hdl_addr_m[targetAddr]) + ' ';
-	//	// msg += " EBP:" + toHex(PIN_GetContextReg(ctxt, REG_STACK_PTR));
-	//}
+	if (hdl_addr_m.find(targetAddr) != hdl_addr_m.end()) {
+		msg = " # HDL:" + toHex(hdl_addr_m[targetAddr]) + ' ';
+		// msg += " EBP:" + toHex(PIN_GetContextReg(ctxt, REG_STACK_PTR));
+	}
 
 	// UINT8 buf[ADDRSIZE];	
 
@@ -228,15 +357,12 @@ void EXE_INS_Memtrace_MR_analysis(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRI
 
 	if (ebp_val >= main_img_saddr && ebp_val < main_img_eaddr && diff >= 0 && diff <= 0xFF) {
 		// msg += "\tEBP:" + toHex(ebp_val) + "\tdiff:" + toHex1(diff);
-		msg += "EBP:" + toHex(ebp_val) + " DIFF:" + toHex1(diff) + ' ';
+		msg += " # EBP:" + toHex(ebp_val) + " DIFF:" + toHex1(diff) + ' ';
 	}
 
-	// msg += "\tVAL:" + toHex(mem_value);
-	msg += "V:" + StringHex(mem_value, mSize*2, false);
-
 	PIN_GetLock(&lock, threadid + 1);
-	// *fout << toHex(ip) << "\tR:" << toHex(targetAddr) << "\t" << mSize << '\t' << GetAddrInfo(targetAddr) << '\t' << asmcode_m[ip] << msg << endl;
-	*fout << toHex(ip) << " R:" << toHex(targetAddr) << ' ' << msg << endl;
+	*fout << "R " << threadid << ' ' << toHex(ip) << ' ' << toHex(targetAddr) << ' ' 
+		<< mSize << ' ' << StringHex(mem_value, mSize * 2, false) << msg << endl;
 
 	PIN_ReleaseLock(&lock);
 }
@@ -797,6 +923,7 @@ int main(int argc, char *argv[])
 	}
 
 	isInsTrace = KnobInstructionTrace.Value();
+	isBlockTrace = KnobBlockTrace.Value();
 	isDumpCode = KnobDumpCode.Value();
 	instrc_saddr = AddrintFromString(KnobTraceStartAddr.Value());
 	instrc_eaddr = AddrintFromString(KnobTraceEndAddr.Value());
@@ -815,7 +942,10 @@ int main(int argc, char *argv[])
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
 
 	if (isMemTrace != "") {
-		TRACE_AddInstrumentFunction(EXE_TRC_MemTrace_Inst, 0);
+		TRACE_AddInstrumentFunction(EXE_TRC_MemTrace_inst, 0);
+	}
+	if (isBlockTrace) {
+		TRACE_AddInstrumentFunction(EXE_TRC_Blk_Inst, 0);
 	}
 	if (isInsTrace) {
 		TRACE_AddInstrumentFunction(EXE_TRC_InsTrc_Inst, 0);		
