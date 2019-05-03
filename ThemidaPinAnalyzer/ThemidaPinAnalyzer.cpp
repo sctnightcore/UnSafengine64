@@ -589,7 +589,7 @@ void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid)
 		set_meblock(addr);
 		if (addr >= main_txt_saddr && addr < main_txt_eaddr)
 		{
-			if (get_mwblock(addr) && get_meblock(addr) == 1)
+			if (get_mwblock(addr) && get_meblock(addr) > 0)
 			{
 				oep = addr;
 				*fout << "OEP:" << toHex(oep - main_img_saddr) << endl;
@@ -1136,6 +1136,14 @@ void IMG_inst(IMG img, void *v)
 		
 		if (SEC_Name(sec) == ".text" || cnt == 0)
 		{
+			// by default, the first section is considered as .text section
+			// if the executable file is compiled in debug mode, the first section is .textbss and the second section is .text
+			if (IMG_IsMainExecutable(img)) {				
+				main_txt_saddr = SEC_Address(sec);
+				main_txt_eaddr = main_txt_saddr + SEC_Size(sec);
+
+			}
+			
 			for (RTN rtn = SEC_RtnHead(sec); RTN_Valid(rtn); rtn = RTN_Next(rtn))
 			{
 				string rtnname = RTN_Name(rtn);
