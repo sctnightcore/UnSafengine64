@@ -31,6 +31,7 @@ void EXE_TRC_Blk_Inst(TRACE trace, void *v)
 	// skip dll module
 	mod_info_t *minfo = GetModuleInfo(addr);
 	mod_info_t *prevminfo = prevmod;
+
 	prevmod = minfo;
 	if (minfo == NULL) return;
 	if (minfo->isDLL() && prevminfo != NULL && prevminfo->isDLL()) return;
@@ -649,9 +650,9 @@ void EXE_Trc_RegMemMap_Ins(TRACE trc, void * v)
 	else if (main_txt_saddr <= addr && addr < main_txt_eaddr &&
 		main_txt_eaddr < prevaddr && prevaddr < main_img_eaddr)
 	{
-		// virtualization area starting point
+		// virtualization area exit point
 		*fout << "VM Exit:" << toHex(prevaddr) << ' ' << toHex(addr) << endl;
-		PIN_ExitApplication(1);
+		vmexit_addr = addr;
 	}
 
 	TRACE_InsertCall(trc, IPOINT_BEFORE, (AFUNPTR)EXE_Trc_RegMemMap_Ana,
@@ -673,6 +674,16 @@ void EXE_Trc_RegMemMap_Ins(TRACE trc, void * v)
 					IARG_THREAD_ID,
 					IARG_END);
 			}
+			if (vmexit_addr == addr)
+			{
+				INS_InsertPredicatedCall(
+					ins, IPOINT_BEFORE, (AFUNPTR)EXE_INS_RegMemMap_vmexit_Ana,
+					IARG_CONTEXT,
+					IARG_INST_PTR,
+					IARG_THREAD_ID,
+					IARG_END);
+			}
+
 
 			if (INS_IsMemoryWrite(ins) && !INS_IsBranchOrCall(ins))
 			{
@@ -693,7 +704,8 @@ void EXE_Trc_RegMemMap_Ins(TRACE trc, void * v)
 					IARG_BOOL, INS_IsStackWrite(ins),
 					IARG_END);
 #if LOG_REGISTER_MEMORY_MAPPING == 1
-				*fout << toHex(addr) << ' ' << INS_Disassemble(ins) << endl;
+				if (vmenter_addr)
+					*fout << toHex(addr) << ' ' << INS_Disassemble(ins) << endl;
 #endif
 			}
 		}
@@ -706,6 +718,11 @@ void EXE_Trc_RegMemMap_Ana(ADDRINT addr, THREADID threadid)
 	prevaddr = addr;
 }
 
+void EXE_INS_RegMemMap_vmexit_Ana(CONTEXT * ctxt, ADDRINT addr, THREADID threadid)
+{
+	dump_registers(ctxt, threadid);
+}
+
 void EXE_INS_RegMemMap_vmenter_Ana(CONTEXT * ctxt, ADDRINT addr, THREADID threadid)
 {
 	if (!reg_2_special_value.empty())
@@ -713,29 +730,31 @@ void EXE_INS_RegMemMap_vmenter_Ana(CONTEXT * ctxt, ADDRINT addr, THREADID thread
 		return;
 	}
 	size_t i = 0;
-	// set register to special one
-#ifdef TARGET_IA32
-	special_values[6] = PIN_GetContextReg(ctxt, REG_ESP);
-	special_values[7] = PIN_GetContextReg(ctxt, REG_EBP);	
-#elif TARGET_IA32E
-	special_values[6] = PIN_GetContextReg(ctxt, REG_RSP);
-	special_values[7] = PIN_GetContextReg(ctxt, REG_RBP);
-#endif
-	if (special_values[6] == special_values[7])
-	{
-		special_values[6] -= ADDRSIZE;
-	}
-	for (REG reg : pin_regs)
-	{		
-		PIN_SetContextRegval(ctxt, reg, (const UINT8*)(&special_values[i]));
-		reg_2_special_value[reg] = special_values[i];
-		special_value_2_reg[special_values[i]] = reg;
-		i++;
-	}
+
+//
+//	// set register to special one
+//#ifdef TARGET_IA32
+//	special_values[6] = PIN_GetContextReg(ctxt, REG_ESP);
+//	special_values[7] = PIN_GetContextReg(ctxt, REG_EBP);	
+//#elif TARGET_IA32E
+//	special_values[6] = PIN_GetContextReg(ctxt, REG_RSP);
+//	special_values[7] = PIN_GetContextReg(ctxt, REG_RBP);
+//#endif
+//	if (special_values[6] == special_values[7])
+//	{
+//		special_values[6] -= ADDRSIZE;
+//	}
+//	for (REG reg : pin_regs)
+//	{		
+//		PIN_SetContextRegval(ctxt, reg, (const UINT8*)(&special_values[i]));
+//		reg_2_special_value[reg] = special_values[i];
+//		special_value_2_reg[special_values[i]] = reg;
+//		i++;
+//	}
 #if LOG_REGISTER_MEMORY_MAPPING == 1
 	dump_registers(ctxt, threadid);
 #endif
-	PIN_ExecuteAt(ctxt);
+	// PIN_ExecuteAt(ctxt);
 }
 
 void EXE_INS_RegMemMap_before_Ana(CONTEXT * ctxt, ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid, BOOL is_stack)

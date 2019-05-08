@@ -30,7 +30,7 @@
     <ProjectGuid>{639EF517-FCFC-408E-9500-71F0DC0458DB}</ProjectGuid>
     <RootNamespace>ThemidaPinAnalyzer</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.17134.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -203,7 +203,7 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <WholeProgramOptimization>false</WholeProgramOptimization>
       <AdditionalIncludeDirectories>..\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__;_WINDOWS_H_PATH_=C:/Program Files (x86)/Windows Kits/10/Include/10.0.17134.0/um</PreprocessorDefinitions>
+      <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__;_WINDOWS_H_PATH_=C:/Program Files (x86)/Windows Kits/10/Include/10.0.17763.0/um</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>

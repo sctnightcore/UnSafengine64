@@ -75,6 +75,7 @@ map<ADDRINT, REG> special_value_2_reg;
 
 // VM information
 ADDRINT vmenter_addr = 0;
+ADDRINT vmexit_addr = 0;
 
 // handler table information
 map<ADDRINT, ADDRINT> hdl_addr_m;
@@ -110,6 +111,8 @@ void EXE_TRC_InsTrc_Inst(TRACE trace, void *v);
 void EXE_Trc_RegMemMap_Ins(TRACE trc, void *v);
 void EXE_Trc_RegMemMap_Ana(ADDRINT ip, THREADID threadid);
 void EXE_INS_RegMemMap_vmenter_Ana(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+void EXE_INS_RegMemMap_vmexit_Ana(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+
 void EXE_INS_RegMemMap_before_Ana(CONTEXT *ctxt, ADDRINT ip, size_t mSize, ADDRINT targetAddr, THREADID threadid, BOOL is_stack);
 void EXE_INS_RegMemMap_after_Ana(CONTEXT *ctxt, size_t mSize, THREADID threadid, BOOL is_stack);
 void dump_registers(CONTEXT *ctxt, THREADID tid);

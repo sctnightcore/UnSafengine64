@@ -7,7 +7,7 @@
 #define LOG_THREAD 0
 
 // log register-memory mapping for code virtualizer
-#define LOG_REGISTER_MEMORY_MAPPING 0
+#define LOG_REGISTER_MEMORY_MAPPING 1
 
 // log call checking for API deobufscation
 #define LOG_CALL_CHECK 0
