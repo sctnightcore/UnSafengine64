@@ -11,3 +11,7 @@
 
 // log call checking for API deobufscation
 #define LOG_CALL_CHECK 0
+
+
+#define DEBUG_PT_TRACE 1
+

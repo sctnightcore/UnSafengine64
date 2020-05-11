@@ -27,10 +27,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{639EF517-FCFC-408E-9500-71F0DC0458DB}</ProjectGuid>
-    <RootNamespace>ThemidaPinAnalyzer</RootNamespace>
+    <ProjectGuid>{95266DD3-DD0C-4886-8F8E-A3820254BD9A}</ProjectGuid>
+    <RootNamespace>CVPinAnalyzer</RootNamespace>
     <Keyword>Win32Proj</Keyword>
     <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
+    <ProjectName>TheTracer</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -79,21 +80,18 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup>
     <_ProjectFileVersion>10.0.40219.1</_ProjectFileVersion>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">c:\pintool\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
-    </IntDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">C:\pintool\</OutDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(Configuration)\</IntDir>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">false</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">c:\pintool\</OutDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(ProjectDir)$(Platform)\$(Configuration)\</OutDir>
     <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\</IntDir>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</GenerateManifest>
-    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\pintool\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">C:\Temp\VC\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
+    <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">c:\pintool\</OutDir>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</GenerateManifest>
     <OutDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">c:\pintool\</OutDir>
-    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">C:\Temp\VC\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
     <LinkIncremental Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkIncremental>
     <GenerateManifest Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</GenerateManifest>
     <CodeAnalysisRuleSet Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AllRules.ruleset</CodeAnalysisRuleSet>
@@ -109,23 +107,22 @@
     <CodeAnalysisRules Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
     <CodeAnalysisRuleAssemblies Condition="'$(Configuration)|$(Platform)'=='Release|x64'" />
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
-    <TargetName>$(ProjectName)64</TargetName>
-  </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <TargetName>$(ProjectName)32</TargetName>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <TargetName>$(ProjectName)32</TargetName>
+    <IntDir>C:\Temp\VC\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <TargetName>$(ProjectName)64</TargetName>
+    <IntDir>C:\Temp\VC\$(ProjectName)\$(Platform)\$(Configuration)\</IntDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
       <AdditionalOptions>/GR- /GS- /EHs- /EHa- /FP:strict /Oi- /FIinclude/msvc_compat.h %(AdditionalOptions)</AdditionalOptions>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>..\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\home\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
@@ -165,7 +162,7 @@
     <ClCompile>
       <AdditionalOptions>/EHs- /EHa- %(AdditionalOptions)</AdditionalOptions>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>C:\pin\source\include\pin;..\CommonPinAnalyzer;C:\pin\source\include\pin\gen;C:\pin\source\tools\InstLib;C:\pin\extras\xed-intel64\include;C:\pin\extras\components\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\home\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;..\InstLib;C:\pin\extras\xed-intel64\include;C:\pin\extras\components\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>TARGET_IA32E;HOST_IA32E;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;_CRT_SECURE_NO_DEPRECATE;_SECURE_SCL=0;WIN32</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
@@ -183,8 +180,8 @@
     </ClCompile>
     <Link>
       <AdditionalOptions>/export:main %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>pin.lib;libxed.lib;libcpmt.lib;libcmt.lib;pinvm.lib;kernel32.lib;ntdll-64.lib;CommonPinAnalyzer64.lib</AdditionalDependencies>
-      <AdditionalLibraryDirectories>C:\pintool;C:\pin\intel64\lib;C:\pin\intel64\lib-ext;C:\pin\extras\xed-intel64\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>pin.lib;libxed.lib;libcpmt.lib;libcmt.lib;pinvm.lib;kernel32.lib;ntdll-64.lib</AdditionalDependencies>
+      <AdditionalLibraryDirectories>C:\pin\intel64\lib;C:\pin\intel64\lib-ext;C:\pin\extras\xed-intel64\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
       <GenerateDebugInformation>true</GenerateDebugInformation>
@@ -198,11 +195,11 @@
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <ClCompile>
-      <AdditionalOptions>/GR- /GS- /EHs- /EHa- /Oi- /FIinclude/msvc_compat.h 
+      <AdditionalOptions>/GR- /GS- /EHs- /EHa- /FP:strict /Oi- /FIinclude/msvc_compat.h 
  %(AdditionalOptions)</AdditionalOptions>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>..\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86;C:\Dev\PinAnalyzer\CommonPinAnalyzer</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__;_WINDOWS_H_PATH_=C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/um</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
@@ -243,7 +240,7 @@
       <PreserveSbr>true</PreserveSbr>
     </Bscmake>
     <PostBuildEvent>
-      <Command>COPY C:\pintool\ThemidaPinAnalyzer*.dll \\192.168.12.50\Shared\Transfer\pintool</Command>
+      <Command>COPY C:\pintool\TheTracer*.dll \\192.168.12.50\Shared\Transfer\pintool</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -251,11 +248,11 @@
       <TargetEnvironment>X64</TargetEnvironment>
     </Midl>
     <ClCompile>
-      <AdditionalOptions>/GR- /GS- /EHs- /EHa- /FP:strict /Oi- /FIinclude/msvc_compat.h 
+      <AdditionalOptions>/GR- /GS- /EHs- /EHa- /Oi- /FIinclude/msvc_compat.h 
  %(AdditionalOptions)</AdditionalOptions>
       <IntrinsicFunctions>false</IntrinsicFunctions>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>..\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-intel64\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86_64;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-intel64\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86_64;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86;..\CommonPinAnalyzer</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>TARGET_IA32E;HOST_IA32E;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__LP64__;_WINDOWS_H_PATH_=C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/um</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
@@ -288,26 +285,21 @@
       <EntryPointSymbol>Ptrace_DllMainCRTStartup</EntryPointSymbol>
       <BaseAddress>0xC5000000</BaseAddress>
       <TargetMachine>MachineX64</TargetMachine>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
     </Link>
-    <PostBuildEvent>
-      <Command>COPY C:\pintool\*.* \\192.168.12.50\Shared\Transfer\pintool</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemGroup>
     <ClCompile Include="..\CommonPinAnalyzer\PinSymbolInfoUtil.cpp" />
-    <ClCompile Include="ThemidaPinAnalyzer.cpp" />
-    <ClCompile Include="ucrtdll.cpp" />
+    <ClCompile Include="TheTracer.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README" />
-    <None Include="cpp.hint" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\CommonPinAnalyzer\PinSymbolInfoUtil.h" />
     <ClInclude Include="..\CommonPinAnalyzer\StrUtil.h" />
     <ClInclude Include="Config.h" />
-    <ClInclude Include="ThemidaPinAnalyzer.h" />
-    <ClInclude Include="ucrtdll.h" />
+    <ClInclude Include="TheTracer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

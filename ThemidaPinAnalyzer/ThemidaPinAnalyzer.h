@@ -5,8 +5,13 @@
 #include <set>
 #include "StrUtil.h"
 #include "PinSymbolInfoUtil.h"
+#include "Config.h"
+
+// file information
+ADDRINT file_size;
 
 // obfuscated module information
+mod_info_t* main_img_info;	// main image
 ADDRINT main_img_saddr = 0;	// section start address where eip is changed into 
 ADDRINT main_img_eaddr = 0;
 ADDRINT main_txt_saddr = 0;	// section start address where eip is changed into 
@@ -19,7 +24,7 @@ ADDRINT obf_idata_saddr = 0;	// idata start
 ADDRINT obf_idata_eaddr = 0;	// idata end
 
 
-ADDRINT oep = 0;	// oep of themida unpacked executable
+ADDRINT oep = 0;	// oep of unpacked executable
 
 /* ================================================================== */
 // Global variables 
@@ -31,7 +36,6 @@ set<size_t> thread_ids;
 PIN_THREAD_UID mainThreadUid;
 
 // internal threads
-int current_resolve_api = -1;	// current resolve api thread number in internal thread
 VOID unpack_thread(VOID *arg);	// unpack thread (main internal thread)
 CONTEXT ctx0;
 
@@ -53,18 +57,21 @@ ADDRINT obf_dll_entry_addr;	// themida dll entry address
 ADDRINT loader_saddr = 0;
 ADDRINT loader_eaddr = 0;
 
-bool is_unpack_started = false;	// dll unpack started
+bool dll_is_unpack_started = false;	// dll unpack started
 
 
 // trace related variables
 int obfCallLevel = 0;	// flag for recording 1-level obfuscated call instructions
-
 mod_info_t *prevmod;	// previous module
+bool except_1;
 
 /////////////////////////////////////////////////////////////////
 // KNOB related flags
 bool isDLLAnalysis = false;
 string packer_type = "themida";
+
+// main file name
+string main_file_name = "";
 
 // obfuscated DLL name
 string obf_dll_name = "";
@@ -77,6 +84,7 @@ bool isMemDump = false;
 
 // direct call
 bool isDirectCall = false;
+
 
 /////////////////////////////////////////////////////////////////
 
@@ -98,6 +106,12 @@ map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 fn_info_t *current_obf_fn = NULL;
 
 // map from obfuscated function into original function
+// this map is used for below two purposes
+// 1. Because Themida x86 obfuscated API functions in newly allocated memory area, 
+//    obfaddr2fn maps obfuscated code address to original API function. 
+// 2. Because Themida and Vmprotect obfuscate Virtual call table and API jump targets, 
+//    obfaddr2fn maps obfuscated api addresses to original API function. 
+//
 map<ADDRINT, fn_info_t*> obfaddr2fn;
 
 // map from obfuscated function into original function of 'mov esi, api' obfuscation
@@ -143,50 +157,83 @@ map<ADDRINT, ADDRINT> addr2fnaddr;
 //
 
 
-enum obf_call_type_t {
-	DIRECT_CALL, INDIRECT_CALL, INDIRECT_JMP, INDIRECT_MOV
+enum obf_call_type_e {
+	DIRECT_CALL, INDIRECT_CALL, INDIRECT_JMP, INDIRECT_MOV, UNDEFINED,
 };
 
+inline const string toString(obf_call_type_e t) {
+	switch (t) {
+	case DIRECT_CALL: return "DIRECT_CALL";
+	case INDIRECT_CALL: return "INDIRECT_CALL";
+	case INDIRECT_JMP: return "INDIRECT_JMP";
+	case INDIRECT_MOV: return "INDIRECT_MOV";
+	}
+	return "UNDEFINED";
+}
+
+inline const obf_call_type_e fromString(string s) {
+	if (s == "DIRECT_CALL") return DIRECT_CALL;
+	if (s == "INDIRECT_CALL") return INDIRECT_CALL;
+	if (s == "INDIRECT_JMP") return INDIRECT_JMP;
+	if (s == "INDIRECT_MOV") return INDIRECT_MOV;	
+	return UNDEFINED;
+}
 
 struct obf_call_t {
-	obf_call_t(ADDRINT sa, ADDRINT da, obf_call_type_t it, string r, size_t g) : 
-		srcaddr(sa), dstaddr(da), ins_type(it), reg(r), prev_push_inst_size(g) {};
-	ADDRINT srcaddr;
-	union {
-		ADDRINT dstaddr;
-		ADDRINT indaddr;
-	};	
-	obf_call_type_t ins_type;
+
+	obf_call_t() {};
+	obf_call_t(ADDRINT sa, ADDRINT da, ADDRINT ia, obf_call_type_e it, string r, size_t g) : 
+		src(sa), dst(da), indaddr(ia), ins_type(it), reg(r), n_prev_pad_byts(g) {};
+
+	ADDRINT src;
+	ADDRINT dst;
+	ADDRINT indaddr;
+	
+	obf_call_type_e ins_type;
 	string reg;
-	size_t prev_push_inst_size;
+	size_t n_prev_pad_byts;
+
+	string get_mnem() {
+		switch (ins_type) {
+		case DIRECT_CALL:
+			return "call";
+		case INDIRECT_CALL:
+			return "call";
+		case INDIRECT_JMP:
+			return "jmp";
+		case INDIRECT_MOV:
+			return "mov";
+		}
+		return "";
+	}
 
 	size_t to_bytes(UINT8* byts) {
 		ADDRINT reladdr;
 		switch (ins_type) {
 		case DIRECT_CALL:
 			byts[0] = 0xe8;			
-			reladdr = dstaddr - (srcaddr + 5);
+			reladdr = dst - (src + 5);
 			ADDRINT_TO_BYTES(reladdr, byts + 1);
 			return 5;
 		case INDIRECT_CALL:
 			byts[0] = 0xff;
-			byts[1] = 0x1f;
+			byts[1] = 0x15;
 			if (ADDRSIZE == 4) {				
-				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+				ADDRINT_TO_BYTES(indaddr, byts + 2);
 			}
 			else {
-				reladdr = indaddr - (srcaddr + 6);
-				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+				reladdr = indaddr - (src + 6);
+				ADDRINT_TO_BYTES(reladdr, byts + 2);
 			}
 			return 6;
 		case INDIRECT_JMP:
 			byts[0] = 0xff;
-			byts[1] = 0x2f;
+			byts[1] = 0x25;
 			if (ADDRSIZE == 4) {
-				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+				ADDRINT_TO_BYTES(indaddr, byts + 2);
 			} 
 			else {
-				reladdr = indaddr - (srcaddr + 6);
+				reladdr = indaddr - (src + 6);
 				ADDRINT_TO_BYTES(reladdr, byts + 2);
 			}
 			return 6;
@@ -198,8 +245,8 @@ struct obf_call_t {
 				else if (reg == "ecx") byts[1] = 0x0d;
 				else if (reg == "edx") byts[1] = 0x15;
 				else if (reg == "esi") byts[1] = 0x35;
-				else if (reg == "edi") byts[1] = 0x3d;																
-				ADDRINT_TO_BYTES(dstaddr, byts + 2);
+				else if (reg == "edi") byts[1] = 0x3d;	
+				ADDRINT_TO_BYTES(indaddr, byts + 2);
 				return 6;
 			}
 			else {	// 64bit
@@ -211,7 +258,7 @@ struct obf_call_t {
 				else if (reg == "rdx") byts[2] = 0x15;
 				else if (reg == "rsi") byts[2] = 0x35;
 				else if (reg == "rdi") byts[2] = 0x3d;
-				reladdr = indaddr - (srcaddr + 7);
+				reladdr = indaddr - (src + 7);
 				ADDRINT_TO_BYTES(reladdr, byts + 3);
 				return 7;
 			}		
@@ -220,39 +267,33 @@ struct obf_call_t {
 	}
 };
 
-vector<obf_call_t> obf_call_candidate_addrs;
+// obfuscated call candidates & obfuscated calls
+vector<obf_call_t> obf_call_candidates;
+vector<obf_call_t> obf_calls;
 
 std::ostream& operator<<(std::ostream &strm, const obf_call_t &a) {
-	switch (a.ins_type) {
-	case DIRECT_CALL:
-		return strm << "direct call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " push_size:" << a.prev_push_inst_size;
-	case INDIRECT_CALL:
-		return strm << "indirect call " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " push_size:" << a.prev_push_inst_size;;
-	case INDIRECT_JMP:
-		return strm << "indirect jmp " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " push_size:" << a.prev_push_inst_size;;
-	case INDIRECT_MOV:
-		return strm << "indirect mov " << toHex(a.srcaddr) << "->" << toHex(a.dstaddr) << " " << a.reg << " push_size:" << a.prev_push_inst_size;;
-	default:
-		return strm;
-	}
+	return strm << toString(a.ins_type) << toHex(a.src) << "->" << toHex(a.dst) << " push_size:" << a.n_prev_pad_byts;	
 }
 
 // flags for current status 
 bool isRegSaved = false;
 bool isCheckAPIStart = false;
 bool isCheckAPIRunning = false;
+
 size_t current_obf_fn_pos = 0;
-ADDRINT current_calladdr = 0;
-ADDRINT current_callnextaddr = 0;
+size_t current_obf_import_pos = 0;
+
+ADDRINT current_caller_addr = 0;
+ADDRINT current_caller_nextaddr = 0;
 bool isCheckAPIEnd = false;
 
 // current obfuscated function address for x64
 ADDRINT current_obf_fn_addr;
 
-// 64bit export block candidate
+// IAT information
+struct IAT_INFO;
 ADDRINT imp_start_addr = 0;
 ADDRINT imp_end_addr = 0;
-vector<fn_info_t*> imp_list;
 bool found_IAT = false;
 bool found_zero_blk = false;
 
@@ -271,30 +312,41 @@ REG regs_for_obfuscation[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_
 REG regs_ctx[] = { REG_EAX, REG_EBX, REG_ECX, REG_EDX, REG_ESI, REG_EDI, REG_ESP, REG_EBP };
 #elif TARGET_IA32E
 REG regs_for_obfuscation[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI };
-REG regs_ctx[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI, REG_RSP, REG_RBP };
+REG regs_ctx[] = { REG_RAX, REG_RBX, REG_RCX, REG_RDX, REG_RSI, REG_RDI, REG_RSP, REG_RBP,     
+	REG_R8,
+	REG_R9,
+	REG_R10,
+	REG_R11,
+	REG_R12,
+	REG_R13,
+	REG_R14,
+	REG_R15, };
 #endif	
 map<REG, ADDRINT> regs_saved;
 
 void save_regs(LEVEL_VM::CONTEXT * ctxt);
 void restore_regs(LEVEL_VM::CONTEXT * ctxt);
+string print_regs(LEVEL_VM::CONTEXT* ctxt);
 
 
+// skip function numbers
+string ir_file;
+bool skip_until_oep = false;
+void ReadIntermediateResult(string filename);
+void WriteIntermediateResult(string filename);
+void AdjustLoadedAddress(ADDRINT delta);
 
-void dump_memory();
 
-void FindObfuscatedAPICalls();
-bool FindIATArea();
-void PrintIATArea();
 
 // Pintool Instrumentation and Analysis Functions
 void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
 void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
-void IMG_inst(IMG img, void *v);
+void IMG_Instrument(IMG img, void *v);
 void INS_inst(INS ins, void *v);
 void INS_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
-void INS_MW_analysis(size_t mSize, ADDRINT targetAddr);
+void INS_MW_analysis(ADDRINT addr, size_t mSize, ADDRINT targetAddr);
 void INS_MR_analysis(ADDRINT targetAddr);
-void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, THREADID threadid);
+void TRC_analysis(CONTEXT *ctxt, ADDRINT addr, bool is_ret, THREADID threadid);
 void TRC_inst(TRACE trace, void *v);
 
 // Memory Read Write Helper
@@ -305,3 +357,92 @@ bool set_mwblock(ADDRINT addr);
 size_t get_mwblock(ADDRINT addr);
 bool set_meblock(ADDRINT addr);
 size_t get_meblock(ADDRINT addr);
+
+template<typename T>
+constexpr auto IS_MAIN_IMG(T addr) { return (addr >= main_img_saddr && addr < main_img_eaddr); }
+
+template<typename T>
+constexpr auto IS_VM_SEC(T addr) { return(addr >= main_vm_saddr && addr < main_vm_eaddr); }
+
+template<typename T>
+constexpr auto IS_TEXT_SEC(T addr) { return(addr >= main_txt_saddr && addr < main_txt_eaddr); }
+
+
+// Dump Related
+
+set<string> kernel32_funcs;
+
+struct IAT_INFO {
+	ADDRINT addr;
+	ADDRINT func_addr;
+	string func_name;
+	string dll_name;
+};
+std::ostream& operator<<(std::ostream& strm, const IAT_INFO& a) {
+	return strm << toHex(a.addr) << " " << toHex(a.func_addr) << " " << a.func_name << " " << a.dll_name;
+}
+
+struct IAT_DLL_INFO {
+	string name;
+	UINT32 first_func;
+	UINT32 nfunc;	
+};
+
+struct REL_INFO {
+	UINT32 pageRVA;
+	UINT32 blkSize;
+	std::vector<UINT16>* reldata;
+};
+
+vector<IAT_INFO> imp_list;
+vector<IAT_DLL_INFO> dll_list;
+
+struct FN_INFO {
+	string dll;
+	string fn;
+};
+
+struct OFFSET_AND_SIZE {
+	ADDRINT offset;
+	size_t size;
+};
+
+void FindObfuscatedAPIJumps();
+void FindObfuscatedAPICalls();
+bool FindIAT();
+void ReconstructImpList();
+void ResolveForwardedFunc(vector<IAT_INFO>& imp_list);
+FN_INFO ResolveForwardedFunc(string fn_name, string mod_name);
+void PrintIATArea();
+
+void FixMemoryProtection();
+void FixIAT();
+void FixCall();
+void DumpUnpackedFile();
+void DumpUnpackedFile_Overlay();
+
+
+// make a copy of original pe header when the image is loaded because themida break the headers from memory dump
+void* hdr_at_load;		
+
+void KeepHeader();
+void* MakeImportSection(UINT32* size, UINT32* idt_size, UINT32 vloc);
+void* MakeImportSectionInRdata(UINT32* size, UINT32* idt_size, UINT32 *vloc, UINT32* last_addr);
+
+void GetImportComponentSize(UINT32* iidsize0, UINT32* iltsize0, UINT32* iinsize0);
+void MakeDllList();
+
+void put_qword(ADDRINT addr, UINT64 val);
+void put_dword(ADDRINT addr, UINT32 val);
+void put_word(ADDRINT addr, UINT16 val);
+void put_xword(ADDRINT addr, ADDRINT val);
+void put_many_bytes(ADDRINT dst, ADDRINT src, int len);
+
+UINT64 get_qword(ADDRINT addr, ADDRINT* paddr);
+UINT32 get_dword(ADDRINT addr, ADDRINT* paddr);
+UINT16 get_word(ADDRINT addr, ADDRINT* paddr);
+void get_many_bytes(ADDRINT dst, ADDRINT src, int len);
+
+
+ADDRINT Align(ADDRINT dwValue, ADDRINT dwAlign);
+void DumpData(const char* fname, ADDRINT start, UINT32 size);

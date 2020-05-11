@@ -93,7 +93,6 @@ struct mod_info_t {
 	bool operator!=(const mod_info_t &) const;
 };
 
-
 // output operators
 std::ostream& operator<<(std::ostream &strm, const fn_info_t &a);
 std::ostream& operator<<(std::ostream &strm, const sec_info_t &a);
@@ -108,7 +107,7 @@ fn_info_t *GetFunctionInfo(ADDRINT addr);
 fn_info_t *GetFunctionInfo(string mod_name, string fn_name);
 string GetAddrInfo(ADDRINT addr);
 
-// module info map
+// module information
 extern map<string, mod_info_t*> module_info_m;
 extern vector<reg_info_t*> region_info_v;
 extern map<ADDRINT, fn_info_t*> fn_info_m;
@@ -123,7 +122,9 @@ extern map<pair<string, string>, fn_info_t*> fn_str_2_fn_info;
 #define STACK_ADDR_WIDTH XED_ADDRESS_WIDTH_32b
 #endif	// XED
 
+int get_disasm(ADDRINT addr, string& res);
 size_t check_disasm(ADDRINT addr);
+size_t check_disasm2(ADDRINT addr);
 bool check_ins_valid(ADDRINT addr);
 
 #endif	// COMMON_PIN_ANALYZER

@@ -27,39 +27,40 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{A3353FB7-0ABB-4571-854F-38BF965B9C2B}</ProjectGuid>
+    <ProjectGuid>{F5639E7B-FCC7-40B5-B578-D19874EAB03D}</ProjectGuid>
     <RootNamespace>CVPinAnalyzer</RootNamespace>
     <Keyword>Win32Proj</Keyword>
-    <WindowsTargetPlatformVersion>10.0.17763.0</WindowsTargetPlatformVersion>
+    <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
+    <ProjectName>Test</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
     <WholeProgramOptimization>true</WholeProgramOptimization>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
     <ConfigurationType>DynamicLibrary</ConfigurationType>
     <CharacterSet>MultiByte</CharacterSet>
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Test|Win32'">
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <PropertyGroup Label="Configuration" Condition="'$(Configuration)|$(Platform)'=='Test|x64'">
-    <PlatformToolset>v141</PlatformToolset>
+    <PlatformToolset>v142</PlatformToolset>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
   <ImportGroup Label="ExtensionSettings">
@@ -198,8 +199,8 @@
  %(AdditionalOptions)</AdditionalOptions>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86;C:\Dev\PinAnalyzer\CommonPinAnalyzer</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__;_WINDOWS_H_PATH_=C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/um</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -238,6 +239,10 @@
     <Bscmake>
       <PreserveSbr>true</PreserveSbr>
     </Bscmake>
+    <PostBuildEvent>
+      <Command>
+      </Command>
+    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <Midl>
@@ -248,8 +253,8 @@
  %(AdditionalOptions)</AdditionalOptions>
       <IntrinsicFunctions>false</IntrinsicFunctions>
       <WholeProgramOptimization>false</WholeProgramOptimization>
-      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-intel64\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86_64;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
-      <PreprocessorDefinitions>TARGET_IA32E;HOST_IA32E;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__LP64__</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-intel64\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86_64;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86;..\CommonPinAnalyzer</AdditionalIncludeDirectories>
+      <PreprocessorDefinitions>TARGET_IA32E;HOST_IA32E;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__LP64__;_WINDOWS_H_PATH_=C:/Program Files (x86)/Windows Kits/10/Include/10.0.18362.0/um</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>
       </ExceptionHandling>
@@ -285,17 +290,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\CommonPinAnalyzer\PinSymbolInfoUtil.cpp" />
-    <ClCompile Include="CVPinAnalyzer.cpp" />
+    <ClCompile Include="Test.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\CommonPinAnalyzer\PinSymbolInfoUtil.h" />
-    <ClInclude Include="..\CommonPinAnalyzer\StrUtil.h" />
     <ClInclude Include="Config.h" />
-    <ClInclude Include="CVPinAnalyzer.h" />
+    <ClInclude Include="Test.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

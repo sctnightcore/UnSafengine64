@@ -11,10 +11,13 @@
 #include <cctype>  
 #include <sstream>
 
-#ifdef TARGET_IA32
-#define	toHex(val) StringHex(val, 8, false)
-#elif TARGET_IA32E
-#define	toHex(val) hexstr(val, 16).substr(2)
-#endif
-
+#define toHex4(val) StringHex(val, 8, false)
+#define toHex8(val) hexstr(val, 8).substr(2)
 #define	toHex1(val) StringHex(val, 2, false)
+
+
+#ifdef TARGET_IA32
+#define	toHex(val) toHex4(val)
+#elif TARGET_IA32E
+#define	toHex(val) toHex8(val)
+#endif
