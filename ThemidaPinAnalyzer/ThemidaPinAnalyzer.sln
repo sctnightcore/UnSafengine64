@@ -19,6 +19,8 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "Test", "..\Test\Test.vcxpro
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TheTracer", "..\TheTracer\TheTracer.vcxproj", "{95266DD3-DD0C-4886-8F8E-A3820254BD9A}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "ExternalFunctionReader", "..\ExternalFunctionReader\ExternalFunctionReader.vcxproj", "{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Win32 = Debug|Win32
@@ -124,6 +126,18 @@ Global
 		{95266DD3-DD0C-4886-8F8E-A3820254BD9A}.Test|Win32.Build.0 = Test|Win32
 		{95266DD3-DD0C-4886-8F8E-A3820254BD9A}.Test|x64.ActiveCfg = Test|x64
 		{95266DD3-DD0C-4886-8F8E-A3820254BD9A}.Test|x64.Build.0 = Test|x64
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Debug|Win32.ActiveCfg = Debug|Win32
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Debug|Win32.Build.0 = Debug|Win32
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Debug|x64.ActiveCfg = Debug|x64
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Debug|x64.Build.0 = Debug|x64
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Release|Win32.ActiveCfg = Release|Win32
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Release|Win32.Build.0 = Release|Win32
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Release|x64.ActiveCfg = Release|x64
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Release|x64.Build.0 = Release|x64
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Test|Win32.ActiveCfg = Test|Win32
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Test|Win32.Build.0 = Test|Win32
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Test|x64.ActiveCfg = Test|x64
+		{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}.Test|x64.Build.0 = Test|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

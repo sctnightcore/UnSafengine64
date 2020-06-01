@@ -122,7 +122,7 @@
     <ClCompile>
       <AdditionalOptions>/GR- /GS- /EHs- /EHa- /FP:strict /Oi- /FIinclude/msvc_compat.h %(AdditionalOptions)</AdditionalOptions>
       <Optimization>Disabled</Optimization>
-      <AdditionalIncludeDirectories>C:\home\CommonPinAnalyzer;C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>C:\pin\source\include\pin;C:\pin\source\include\pin\gen;c:\pin\extras\xed-ia32\include\xed;c:\pin\extras\components\include;c:\pin\extras\stlport\include;c:\pin\extras;c:\pin\extras\libstdc++\include;c:\pin\extras\crt\include;c:\pin\extras\crt;c:\pin\extras\crt\include\arch-x86;c:\pin\extras\crt\include\kernel\uapi;c:\pin\extras\crt\include\kernel\uapi\asm-x86</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>TARGET_IA32;HOST_IA32;TARGET_WINDOWS;BIGARRAY_MULTIPLIER=1;WIN32;__PIN__=1;PIN_CRT=1;__i386__</PreprocessorDefinitions>
       <MinimalRebuild>false</MinimalRebuild>
       <ExceptionHandling>

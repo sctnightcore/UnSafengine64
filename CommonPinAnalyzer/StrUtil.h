@@ -5,11 +5,11 @@
 
 
 #include "pin.H"
-#include <algorithm>
-#include <string>
-#include <iomanip>
-#include <cctype>  
-#include <sstream>
+// #include <string>
+// #include <cctype>  
+// #include <sstream>
+// #include <algorithm>
+// #include <iomanip>
 
 #define toHex4(val) StringHex(val, 8, false)
 #define toHex8(val) hexstr(val, 8).substr(2)

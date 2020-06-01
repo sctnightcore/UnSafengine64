@@ -27,11 +27,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{95266DD3-DD0C-4886-8F8E-A3820254BD9A}</ProjectGuid>
+    <ProjectGuid>{B84E54B7-1E5E-40ED-9ED4-DF84172E8E36}</ProjectGuid>
     <RootNamespace>CVPinAnalyzer</RootNamespace>
     <Keyword>Win32Proj</Keyword>
     <WindowsTargetPlatformVersion>10.0.18362.0</WindowsTargetPlatformVersion>
-    <ProjectName>TheTracer</ProjectName>
+    <ProjectName>ExternalFunctionReader</ProjectName>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
@@ -240,7 +240,7 @@
       <PreserveSbr>true</PreserveSbr>
     </Bscmake>
     <PostBuildEvent>
-      <Command>COPY C:\pintool\TheTracer*.dll \\192.168.12.50\Shared\Transfer\pintool</Command>
+      <Command>COPY C:\pintool\ExternalFunctionReader*.dll \\192.168.12.50\Shared\Transfer\pintool</Command>
     </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -289,17 +289,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="..\CommonPinAnalyzer\PinSymbolInfoUtil.cpp" />
-    <ClCompile Include="TheTracer.cpp" />
+    <ClCompile Include="ExternalFunctionReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <None Include="..\README" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="..\CommonPinAnalyzer\PinSymbolInfoUtil.h" />
     <ClInclude Include="..\CommonPinAnalyzer\StrUtil.h" />
-    <ClInclude Include="Config.h" />
-    <ClInclude Include="TheTracer.h" />
+    <ClInclude Include="ExternalFunctionReader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
