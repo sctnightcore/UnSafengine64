@@ -59,7 +59,7 @@ int read_config_file(string config_file) {
 		}
 	}
 	PINEXE = PIN_DIR + "\\pin.exe";	
-	PINTOOL64 = PINTOOL_DIR + "\\SafengineAnalyzer.dll";	
+	PINTOOL64 = PINTOOL_DIR + "\\UnSafengine64.dll";	
 	return 1;
 }
 
