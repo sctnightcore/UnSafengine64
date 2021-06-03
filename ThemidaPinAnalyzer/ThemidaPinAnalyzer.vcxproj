@@ -277,7 +277,7 @@
     </ClCompile>
     <Link>
       <AdditionalOptions>/export:main %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>pin.lib;xed.lib;pinvm.lib;kernel32.lib;pincrt.lib;ntdll-64.lib;crtbeginS.obj</AdditionalDependencies>
+      <AdditionalDependencies>pin.lib;xed.lib;pincrt.lib;kernel32.lib;crtbeginS.obj</AdditionalDependencies>
       <AdditionalLibraryDirectories>C:\pin\intel64\lib;C:\pin\intel64\lib-ext;C:\pin\extras\xed-intel64\lib;C:\pin\intel64\runtime\pincrt;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <IgnoreAllDefaultLibraries>true</IgnoreAllDefaultLibraries>
       <IgnoreSpecificDefaultLibraries>%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>

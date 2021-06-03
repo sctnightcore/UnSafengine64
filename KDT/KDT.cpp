@@ -13,7 +13,7 @@ string PINTOOL32;
 string PINTOOL64;
 string LOADDLL32;
 string LOADDLL64;
-string GETFILEINFO = "7z.exe l";
+string GETFILEINFO = "DIE\\diec.exe";
 string CONFIG = "KDT.cfg";
 
 string ExePath() {
@@ -147,10 +147,10 @@ int main(int argc, char** argv)
 		while (fgets(psBuffer, 256, pPipe)) {
 			string line;
 			line = string(psBuffer);
-			if (line.find("x86") != string::npos) machine = "x86";
-			if (line.find("x64") != string::npos) machine = "x64";
-			if (line.find("Executable") != string::npos) file_type = "exe";
-			if (line.find("Executable DLL") != string::npos) file_type = "dll";
+			if (line.find("PE32") != string::npos) machine = "x86";
+			if (line.find("PE64") != string::npos) machine = "x64";
+			if (line.find("GUI") != string::npos || line.find("Console") != string::npos) file_type = "exe";
+			if (line.find("DLL") != string::npos) file_type = "dll";
 		}
 	}
 	
@@ -210,6 +210,11 @@ int main(int argc, char** argv)
 			}
 		}
 
+		// delete previous dump file
+		string out_file = file_name + "_dmp." + file_type;
+		cout << out_file << endl;
+		remove(out_file.c_str());
+
 		cmd_line2 += " " + file_name;
 		cout << cmd_line2 << endl;
 		system(cmd_line2.c_str());
@@ -224,9 +229,7 @@ int main(int argc, char** argv)
 			continue;
 		}
 
-		continue_execute = false;
-		string out_file = file_name + "_dmp." + file_type;
-		cout << out_file << endl;
+		continue_execute = false;		
 		if (check_output_file(out_file)) {
 			cout << out_file << " is generated." << endl;
 		}

@@ -202,15 +202,11 @@ RunUntilAPIFunctionStatus run_until_api_function_status;
 // the instructions are executed following the control flows 
 // until the IP reaches any API function or exception occurs or the number of instructions reaches the limit. 
 
-size_t curr_obf_fn_pos = 0;
+size_t curr_obf_fn_pos = 0;	
 size_t curr_obf_iat_pos = 0;
 
-ADDRINT curr_obf_call_src = 0;
-ADDRINT curr_obf_call_src_next_addr = 0;
-ADDRINT curr_obf_API_fn_target;
 ObfuscatedCall* curr_obf_call;
 ObfuscatedIATElement* curr_obf_iat_elem;
-
 
 // IAT information
 ADDRINT imp_start_addr = 0;
@@ -310,7 +306,7 @@ string PrintRegisters(LEVEL_VM::CONTEXT* ctxt)
 
 // currently assume that only one register is used for storing API function address
 // TODO: multiple registers may contain API function addresses
-REG CheckRegisterAssignedWithAPIFunctionAddress(LEVEL_VM::CONTEXT* ctxt)
+REG GetRegisterAssignedWithAPIFunctionAddress(LEVEL_VM::CONTEXT* ctxt)
 {
 	REG set_api_reg = REG_INVALID_;
 	for (REG reg : regs_for_obfuscation) {
@@ -593,15 +589,15 @@ void FindObfuscatedAPICalls()
 				// *fout << toHex(main_txt_saddr + idx) << endl;
 				if (buff_text_section[idx] == 0xE8) {
 
-					if (buff_text_section[idx + 5] == 0x90) obf_call.n_prev_pad_byts = 0;
-					else if (buff_text_section[idx -1] == 0x90) obf_call.n_prev_pad_byts = 1;
+					if (buff_text_section[idx + 5] == 0x90) obf_call.n_prev_pad_bytes = 0;
+					else if (buff_text_section[idx -1] == 0x90) obf_call.n_prev_pad_bytes = 1;
 					else continue;
 					obf_call.ins_type = ObfuscatedCallType::kINDIRECT_CALL;
 				}
 				else if (buff_text_section[idx] == 0xE9) {
 					
-					if (buff_text_section[idx - 1] == 0x90) obf_call.n_prev_pad_byts = 1;
-					else obf_call.n_prev_pad_byts = 0;
+					if (buff_text_section[idx - 1] == 0x90) obf_call.n_prev_pad_bytes = 1;
+					else obf_call.n_prev_pad_bytes = 0;
 					// else if (bufp[5] == 0x90) obf_call.n_prev_pad_byts = 0;
 					// jmp api. not accurate heuristics. only seh
 					// else if (bufp[6] == 0xcc && bufp[7] == 0xcc && bufp[8] == 0xcc && bufp[9] == 0xcc) obf_call.n_prev_pad_byts = 0;
@@ -610,7 +606,7 @@ void FindObfuscatedAPICalls()
 				}
 				else continue;
 
-				obf_call.src = main_text_section_start_address + idx - obf_call.n_prev_pad_byts;
+				obf_call.src = main_text_section_start_address + idx - obf_call.n_prev_pad_bytes;
 				obf_call.dst = obf_call.src + 6 + TO_UINT32(buff_text_section + idx + 1);
 				DLOG(LogType::kLOG_DUMP, toHex(obf_call.src) << "->" << toHex(obf_call.dst) << endl);
 
@@ -1171,7 +1167,7 @@ void PrintIATArea()
 
 
 // API Detect executable trace analysis function
-void Pintool_Analysis_TRC_OEP(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID threadid)
+void Analysis_TRC_OEP(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID threadid)
 {
 
 	if (threadid != 0) return;
@@ -1187,7 +1183,7 @@ void Pintool_Analysis_TRC_OEP(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID
 	{
 		// common for dll and exe
 		SetMemoryPageExecute(addr);
-		if (IsMainImageTextSection(addr))
+		if (!is_dll_analysis && IsMainImageTextSection(addr))
 		{
 			NW::PBYTE p_oep_code = (NW::PBYTE)addr;
 			NW::BYTE oep_code[2] = { *p_oep_code, *(p_oep_code + 1) };
@@ -1218,13 +1214,19 @@ void Pintool_Analysis_TRC_OEP(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID
 
 		// if some problem occurs in dll
 		if (is_dll_analysis && dll_is_unpack_started) {
-			if (addr >= loader_saddr && addr < loader_eaddr) {
-				// set fake oep
-				oep = main_text_section_start_address - main_image_start_address;
+			if (IsMainImageTextSection(addr)) {				
+				oep = addr - main_image_start_address;
 				*fout << "OEP:" << toHex(oep) << endl;
 				PIN_SaveContext(ctxt, &ctx0);
 				PIN_SemaphoreSet(&sem_oep_found);
 			}
+			//if (addr >= loader_saddr && addr < loader_eaddr) {
+			//	// set fake oep
+			//	oep = main_text_section_start_address - main_image_start_address;
+			//	*fout << "OEP:" << toHex(oep) << endl;
+			//	PIN_SaveContext(ctxt, &ctx0);
+			//	PIN_SemaphoreSet(&sem_oep_found);
+			//}
 		}
 	}
 	else if (skip_until_oep) {
@@ -1240,8 +1242,19 @@ void Pintool_Analysis_TRC_OEP(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID
 }
 
 
-void CheckNextObfuscatedAPIFunctionCandidate(LEVEL_VM::CONTEXT* ctxt)
-{
+// thread control
+void Analysis_Thread(THREADID threadid) {
+	if (threadid != 0) {
+		*fout << "thread: " << threadid << " exit" << endl;
+		fout->flush();
+		PIN_ExitThread(0);
+	}
+}
+
+
+void ToNextObfCall(CONTEXT* ctxt) {
+	run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextCall;
+
 	// register context save & restore
 	if (is_register_saved) {
 		RestoreRegisters(ctxt);
@@ -1251,57 +1264,42 @@ void CheckNextObfuscatedAPIFunctionCandidate(LEVEL_VM::CONTEXT* ctxt)
 		is_register_saved = true;
 	}
 
-	if (curr_obf_fn_pos < obf_call_candidates.size()) {
-		DLOG(LogType::kLOG_CALL_CHECK, "FN-" << curr_obf_fn_pos << '/' << obf_call_candidates.size() << endl);
-	}
-	else {
-		DLOG(LogType::kLOG_CALL_CHECK, "IAT-" << curr_obf_iat_pos << '/' << obf_iat_elems.size() << endl);
-	}
-
 	ADDRINT next_addr;
 
 	// resolve obfuscated call
 	// the result is stored at 'obf_calls'
 	if (curr_obf_fn_pos < obf_call_candidates.size()) {
+		DLOG(LogType::kLOG_CALL_CHECK, "FN-" << curr_obf_fn_pos << '/' << obf_call_candidates.size() << endl);
 		curr_obf_call = &obf_call_candidates.at(curr_obf_fn_pos++);
-		curr_obf_call_src = curr_obf_call->src;
-		curr_obf_call_src_next_addr = curr_obf_call->src + 6;
 		curr_obf_iat_elem = NULL;
-		curr_obf_API_fn_target = curr_obf_call->dst;
 		// currently call instruction is of the form 'E8 __ __ __ __' which is 5 bytes
 		// but originally it is 'FF 15 __ __ __ __' or 'FF 25 __ __ __ __' which is 6 bytes
 		// so next instruction address is addr + 6			
 
 		// next address is caller
 		// to check mov reg, ...
-		next_addr = curr_obf_call_src;
+		next_addr = curr_obf_call->src;
 		DLOG(LogType::kLOG_CALL_CHECK, "Checking Obfuscated Call: " <<
-			toHex(curr_obf_call_src) << " -> " << toHex(curr_obf_API_fn_target) <<
+			toHex(curr_obf_call->src) << " -> " << toHex(curr_obf_call->dst) <<
 			" (" << curr_obf_fn_pos << '/' << obf_call_candidates.size() << ")\n");
 	}
 
 	// resolve obfuscated IAT elements
 	// the result updates 'iat_elem_by_addr'
 	else if (curr_obf_iat_pos < obf_iat_elems.size()) {
+		DLOG(LogType::kLOG_CALL_CHECK, "IAT-" << curr_obf_iat_pos << '/' << obf_iat_elems.size() << endl);
 		curr_obf_iat_elem = &obf_iat_elems.at(curr_obf_iat_pos++);
 		curr_obf_call = NULL;
-		curr_obf_API_fn_target = curr_obf_iat_elem->dst;
 		next_addr = curr_obf_iat_elem->dst;
 		DLOG(LogType::kLOG_CALL_CHECK, "Checking Obfuscated IAT Element: " <<
 			toHex(curr_obf_iat_elem->src) << " -> " << toHex(next_addr) <<
 			" (" << curr_obf_iat_pos << '/' << obf_iat_elems.size() << ")\n");
 	}
 	else {
-		// when checking obfuscated call finished, prepare the end 
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kFinalize;
+		// when checking obfuscated call finished, prepare the end 				
 		DLOG(LogType::kLOG_CALL_CHECK, "Checking End\n");
-		
-		// after checking obfuscated calls, terminate.		
-		PIN_SemaphoreSet(&sem_resolve_api_end);
-		PIN_SemaphoreWait(&sem_dump_finished);
-		((ofstream*)fout)->close();
-		PIN_ExitProcess(-1);
-		return;
+		run_until_api_function_status = RunUntilAPIFunctionStatus::kFinalize;
+		DoFinalize();		
 	}
 
 	trace_address_sequence.clear();
@@ -1309,327 +1307,244 @@ void CheckNextObfuscatedAPIFunctionCandidate(LEVEL_VM::CONTEXT* ctxt)
 	register_to_value_API_function_name.clear();
 
 	run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckCurrentFunction;
-	fout->flush();
 
-	*fout << "DEBUG: HERE !!! " << endl;
-	fout->flush();
 	// testing call instruction
-	if (curr_obf_call->ins_type == ObfuscatedCallType::kINDIRECT_CALL) {		
+	if (curr_obf_call->ins_type == ObfuscatedCallType::kINDIRECT_CALL) {
 		// jump to the call destination
 		ADDRINT dst = curr_obf_call->dst;
-		ADDRINT stktop = PIN_GetContextReg(ctxt, REG_STACK_PTR);		
+		ADDRINT ret_addr = curr_obf_call->src + 5;
+
+		// push return address and go to the target address
+		ADDRINT stktop = PIN_GetContextReg(ctxt, REG_STACK_PTR) + ADDRSIZE;
 		if (IsMainImage(dst) && !IsMainImageTextSection(dst)) {
 			*fout << "DEBUG: Directly go to call target " << toHex(dst) << endl;
-			PIN_SetContextReg(ctxt, REG_STACK_PTR, stktop + ADDRSIZE);
-			*((ADDRINT*)stktop) = dst + 5;
+			*fout << "RSP=" << toHex(stktop) << endl;
+			*fout << "[RSP]=" << toHex(ret_addr) << endl;
+			PIN_SetContextReg(ctxt, REG_STACK_PTR, stktop);
+			*((ADDRINT*)stktop) = ret_addr;
 			PIN_SetContextReg(ctxt, REG_INST_PTR, dst);
-			PIN_ExecuteAt(ctxt);			
+			PIN_ExecuteAt(ctxt);
 		}
-		
+
 	}
 	PIN_SetContextReg(ctxt, REG_INST_PTR, next_addr);
-	PIN_ExecuteAt(ctxt);
-	
+	PIN_ExecuteAt(ctxt);	
 }
 
-void CheckAddressAPI(ADDRINT& addr, LEVEL_VM::CONTEXT* ctxt, bool is_ret)
-{
-	// if obfuscated API checking is started and 
-	// if the trace is in another section
-	// then here is the obfuscated instructions that resolve 'call API_function'
-	// These obfuscated instructions end by 'RET' instruction 
-	// that jumps into API function code
-	//
-	// .text:     ...
-	//   mov_obf_caller: call mov_obf_addr
-	//                   db xx
-	//   ret_addr      : ... 
-	//                   ...
-	//   obf_caller    : call REG 
-	// 
-	// .vmp0:             
-	//                    ...
-	//   mov_obf_addr  :  ...
-	//                    ... (the effect of obfuscated code is equivalent to MOV REG, api_fn )
-	//                    ret xx
-	ADDRINT caller_addr = 0;
-	UINT8 buf[8];
-	ADDRINT stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);
-	PIN_SafeCopy(buf, (VOID*)stkptr, ADDRSIZE);
-	ADDRINT stk_top_val = TO_ADDRINT(buf);
-	trace_address_sequence.push_back(addr);
-	trace_stack_pointer_sequence.push_back(stkptr);
-	DLOG(LogType::kLOG_CALL_CHECK, "CheckAPI running " << toHex(addr) << ' ' << GetAddrInfo(addr) << ' ' << trace_address_sequence.size() << endl);
-	fout->flush();
 
-	FunctionInformation* fninfo;
+// run until api
+int DoRunUntilAPI(CONTEXT *ctxt, ADDRINT addr, bool is_ret) {
 
-	// check MOV reg, api_fn		
-	caller_addr = curr_obf_call->src;
-
-	if (addr == caller_addr + 5 || addr == caller_addr + 6)
-	{
-		// check 'mov reg, [iat:api_function]'
-		REG set_api_reg = CheckRegisterAssignedWithAPIFunctionAddress(ctxt);
-		if (set_api_reg != REG_INVALID_)
-		{
-			DLOG(LogType::kLOG_CALL_CHECK, "# MOV Caller address: " << caller_addr << endl);
-			DLOG(LogType::kLOG_CALL_CHECK, "# MOV return address: " << addr << endl);
-			DLOG(LogType::kLOG_CALL_CHECK, "# MOV next to Caller: " << trace_next_addr_m[caller_addr] << endl);
-			DLOG(LogType::kLOG_CALL_CHECK, "# SP before mov call: " << trace_stack_pointer_sequence[0] << endl);
-			DLOG(LogType::kLOG_CALL_CHECK, "# SP after mov call : " << stkptr << endl);
-
-			ADDRINT adjusted_caller_addr = addr - 6;
-			ADDRINT api_fn_addr = register_to_value_API_function_name[set_api_reg].first;
-			fninfo = GetFunctionInfo(api_fn_addr);
-
-			DLOG(LogType::kLOG_CALL_CHECK, toHex(adjusted_caller_addr - main_image_start_address) << "\tmov-" << REG_StringShort(set_api_reg) << '\t' << fninfo << endl);
-			obfaddr2fn[curr_obf_API_fn_target] = fninfo;
-			mov_obfaddr2fn[curr_obf_API_fn_target] = fninfo;
-			obf_calls.push_back(ObfuscatedCall(adjusted_caller_addr, fninfo->saddr, 0, ObfuscatedCallType::kINDIRECT_MOV, REG_StringShort(set_api_reg), 0));
-		}
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-	}
-
-	// because some text section has some illegal instructions
-	// skip ip is at .text after the first call
-	// CAUTION: some vmp has virtualized obfuscated call in IAT
-	if (trace_address_sequence.size() > 1 && IsMainImageTextSection(addr) && !is_ret) {
-		*fout << ".text section and not is_ret" << endl;
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-	}
-
-	if (trace_address_sequence.size() > 100 && !IsMainImageVMPSection(addr))
-	{
-		*fout << "obfuscated call too long" << endl;
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-	}
-
-	// check ret to API which leads to incur exceptions
-	// check stack top instead
-	ADDRINT check_addr = (IsMainImage(addr) && is_ret) ? stk_top_val : addr;
-
-	// if the trace in in API function
-	// then the current address or return address is the API function. 		
-	fninfo = GetFunctionInfo(check_addr);
-
-	if (curr_obf_call && (curr_obf_call->src == 0x78601b7f || curr_obf_call->src == 0x785ff26e)) {
-		*fout << "DEBUG: HERE " << fninfo << endl;
+	if (run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckCurrentFunction) {
+		// if obfuscated API checking is started and 
+		// if the trace is in another section
+		// then here is the obfuscated instructions that resolve 'call API_function'
+		// These obfuscated instructions end by 'RET' instruction 
+		// that jumps into API function code
+		//
+		// .text:     ...
+		//   mov_obf_caller: call mov_obf_addr
+		//                   db xx
+		//   ret_addr      : ... 
+		//                   ...
+		//   obf_caller    : call REG 
+		// 
+		// .vmp0:             
+		//                    ...
+		//   mov_obf_addr  :  ...
+		//                    ... (the effect of obfuscated code is equivalent to MOV REG, api_fn )
+		//                    ret xx		
+		ADDRINT stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);
+		ADDRINT stk_top_val = *((ADDRINT*)stkptr);
+		trace_address_sequence.push_back(addr);
+		trace_stack_pointer_sequence.push_back(stkptr);
+		DLOG(LogType::kLOG_CALL_CHECK, "CheckAPI running " << toHex(addr) << ' ' << GetAddrInfo(addr) << ' ' << trace_address_sequence.size() << endl);
 		fout->flush();
-	}
 
+		FunctionInformation* fninfo;
 
-	if (fninfo == NULL) return;
+		// check MOV reg, api_fn		
+		if (addr == curr_obf_call->src + 5 || addr == curr_obf_call->src + 6)
+		{
+			// check 'mov reg, [iat:api_function]'
+			REG set_api_reg = GetRegisterAssignedWithAPIFunctionAddress(ctxt);
+			if (set_api_reg != REG_INVALID_)
+			{
+				DLOG(LogType::kLOG_CALL_CHECK, "# MOV Caller address: " << curr_obf_call->src << endl);
+				DLOG(LogType::kLOG_CALL_CHECK, "# MOV return address: " << addr << endl);
+				DLOG(LogType::kLOG_CALL_CHECK, "# MOV next to Caller: " << trace_next_addr_m[curr_obf_call->src] << endl);
+				DLOG(LogType::kLOG_CALL_CHECK, "# SP before mov call: " << trace_stack_pointer_sequence[0] << endl);
+				DLOG(LogType::kLOG_CALL_CHECK, "# SP after mov call : " << stkptr << endl);
 
-	// skip user exception by false positive find api calls
-	if (fninfo->name.find("KiUserExceptionDispatcher") != string::npos)
-	{
-		*fout << "obfuscated call: Exception" << endl;
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-	}
+				ADDRINT adjusted_caller_addr = addr - 6;
+				ADDRINT api_fn_addr = register_to_value_API_function_name[set_api_reg].first;
+				fninfo = GetFunctionInfo(api_fn_addr);
 
-	if (packer_type == "tmd2" || packer_type == "tmd3" || packer_type == "enigma")
-	{
-		if (curr_obf_call) {
-			// Check the stack top value whether the value is next address of the call instruction. 
-			ObfuscatedCallType ty;
-			if (stk_top_val == curr_obf_call_src_next_addr) {
-				ty = ObfuscatedCallType::kINDIRECT_CALL;
-			}
-			else {
-				ty = ObfuscatedCallType::kINDIRECT_JMP;
-			}
-
-			*fout << "# --- " << fninfo->module_name << '\t' << fninfo->name << endl;
-			obfaddr2fn[curr_obf_API_fn_target] = fninfo;
-			*fout << "# --- " << toHex(curr_obf_call_src) << "->" << toHex(check_addr) << ' ' << ty << endl;
-			auto obf_call = ObfuscatedCall(curr_obf_call_src, fninfo->saddr, curr_obf_call->indaddr, ty, "", 0);
-			*fout << "# " << obf_call << endl;
-			obf_calls.push_back(obf_call);
-		}
-		else if (curr_obf_iat_elem) {
-			auto mf = ResolveForwardedFunc(fninfo->module_name, fninfo->name);
-			fninfo->name = mf.fn;
-			fninfo->module_name = mf.dll;
-
-			*fout << "# --- " << fninfo->module_name << '\t' << fninfo->name << endl;
-			iat_elem_by_addr[curr_obf_iat_elem->src] = { curr_obf_iat_elem->src, fninfo->saddr, fninfo->name, fninfo->module_name };
-
-			obfaddr2fn[curr_obf_API_fn_target] = fninfo;
-		}
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-	}
-	else if (packer_type == "vmp")
-	{
-		// Check call/jmp
-		// Compare stack top to check the return address which points to the next to the caller instruction. 		
-		ADDRINT adjusted_caller_addr;
-		string call_type;
-		ObfuscatedCallType ty;
-
-		if (is_ret) {
-			stkptr += ADDRSIZE;
-			PIN_SafeCopy(buf, (VOID*)stkptr, ADDRSIZE);
-			stk_top_val = TO_ADDRINT(buf);
+				DLOG(LogType::kLOG_CALL_CHECK, toHex(adjusted_caller_addr - main_image_start_address) << "\tmov-" << REG_StringShort(set_api_reg) << '\t' << fninfo << endl);
+				obfaddr2fn[curr_obf_call->dst] = fninfo;
+				mov_obfaddr2fn[curr_obf_call->dst] = fninfo;
+				obf_calls.push_back(ObfuscatedCall(adjusted_caller_addr, fninfo->saddr, 0, ObfuscatedCallType::kINDIRECT_MOV, REG_StringShort(set_api_reg), 0));
+			}			
+			ToNextObfCall(ctxt);
+			// return 1; //  continue;
 		}
 
-		INT32 stk_diff = trace_stack_pointer_sequence[0] - stkptr;
+		// because some text section has some illegal instructions
+		// skip ip is at .text after the first call
+		// CAUTION: some vmp has virtualized obfuscated call in IAT
+		if (trace_address_sequence.size() > 1 && IsMainImageTextSection(addr) && !is_ret) {
+			*fout << ".text section and not is_ret" << endl;
+			ToNextObfCall(ctxt);			
+			// return 1; //  continue;
+		}
+
+		if (trace_address_sequence.size() > 100 && !IsMainImageVMPSection(addr))
+		{
+			*fout << "obfuscated call too long" << endl;
+			ToNextObfCall(ctxt);
+			// return 1; // continue;
+		}
+
+		// if the trace in in API function
+		// then the current address or return address is the API function. 		
+		fninfo = GetFunctionInfo(addr);
+
+		if (curr_obf_fn_pos == 13) {
+			*fout << "!! here" << endl;
+		}
 		
+		if (fninfo == NULL) return 0; //  break;
 
-		if (stk_diff != 0 && stk_diff != ADDRSIZE && stk_diff != -ADDRSIZE)
+		if (curr_obf_fn_pos == 13) {
+			*fout << "!! here" << endl;
+		}
+
+
+		// skip user exception by false positive find api calls
+		if (fninfo->name.find("KiUserExceptionDispatcher") != string::npos)
 		{
-			*fout << "Check call/jmp" << endl;
-			*fout << *fninfo << endl;
-			*fout << toHex(trace_stack_pointer_sequence[0]) << endl;
-			*fout << toHex(stkptr) << endl;
-			fout->flush();
-			run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-			CheckNextObfuscatedAPIFunctionCandidate(ctxt);
+			*fout << "obfuscated call: Exception" << endl;
+			ToNextObfCall(ctxt); 			
+			// return 1; //  continue;
 		}
 
-		else if (stk_top_val == caller_addr + 5 || stk_top_val == caller_addr + 6) {
-			call_type = "call";
-			ty = ObfuscatedCallType::kINDIRECT_CALL;
-			if (stk_diff == ADDRSIZE)
-			{
-				adjusted_caller_addr = caller_addr;
-			}
-			else if (stk_diff == 0)
-			{
-				adjusted_caller_addr = caller_addr - 1;
-			}
-			else
-			{
-				run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-				CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-			}
-		}
-		else
+		if (packer_type == "tmd2" || packer_type == "tmd3" || packer_type == "enigma")
 		{
-			call_type = "goto";
-			ty = ObfuscatedCallType::kINDIRECT_JMP;
-			if (stk_diff == 0)
-			{
-				adjusted_caller_addr = caller_addr;
+			if (curr_obf_call) {
+				// Check the stack top value whether the value is next address of the call instruction. 
+				ObfuscatedCallType ty;
+				if (stk_top_val == curr_obf_call->next_addr) {
+					ty = ObfuscatedCallType::kINDIRECT_CALL;
+				}
+				else {
+					ty = ObfuscatedCallType::kINDIRECT_JMP;
+				}
+
+				*fout << "# --- " << fninfo->module_name << '\t' << fninfo->name << endl;
+				obfaddr2fn[curr_obf_call->dst] = fninfo;
+				*fout << "# --- " << toHex(curr_obf_call->src) << "->" << toHex(addr) << ' ' << ty << endl;
+				auto obf_call = ObfuscatedCall(curr_obf_call->src, fninfo->saddr, curr_obf_call->ind_addr, ty, "", 0);
+				*fout << "# " << obf_call << endl;
+				obf_calls.push_back(obf_call);
 			}
-			else if (stk_diff == -ADDRSIZE)
-			{
-				adjusted_caller_addr = caller_addr - curr_obf_call->n_prev_pad_byts;
+			else if (curr_obf_iat_elem) {
+				auto mf = ResolveForwardedFunc(fninfo->module_name, fninfo->name);
+				fninfo->name = mf.fn;
+				fninfo->module_name = mf.dll;
+
+				*fout << "# --- " << fninfo->module_name << '\t' << fninfo->name << endl;
+				iat_elem_by_addr[curr_obf_iat_elem->src] = { curr_obf_iat_elem->src, fninfo->saddr, fninfo->name, fninfo->module_name };
+
+				obfaddr2fn[curr_obf_iat_elem->dst] = fninfo;
 			}
-			else
-			{
-				run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-				CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-			}
+			ToNextObfCall(ctxt);			
+			// return 1; // continue;
 		}
+		else if (packer_type == "vmp")
+		{
+			// cannot reach here
+			*fout << "cannot reach here" << endl;
 
-		DLOG(LogType::kLOG_CALL_CHECK, "# Caller address: " << toHex(caller_addr) << endl);
-		DLOG(LogType::kLOG_CALL_CHECK, "# return address: " << toHex(stk_top_val) << endl);
-		DLOG(LogType::kLOG_CALL_CHECK, "# next to Caller: " << trace_next_addr_m[caller_addr] << endl);
-		DLOG(LogType::kLOG_CALL_CHECK, "# SP before call: " << trace_stack_pointer_sequence[0] << endl);
-		DLOG(LogType::kLOG_CALL_CHECK, "# SP at API func: " << stkptr << endl);
-		DLOG(LogType::kLOG_CALL_CHECK, "# call type     : " << call_type << endl);
-		if (check_addr != fninfo->saddr) DLOG(LogType::kLOG_CALL_CHECK, "branch into the middle of API function\n");
-
-		DLOG(LogType::kLOG_CALL_CHECK,
-			toHex(adjusted_caller_addr - main_image_start_address) << '\t' <<
-			call_type << '\t' <<
-			fninfo->module_name << '\t' <<
-			fninfo->name << endl);
-
-		obf_calls.push_back(ObfuscatedCall(adjusted_caller_addr, fninfo->saddr, 0, ty, "", 0));
-		obfaddr2fn[curr_obf_API_fn_target] = fninfo;
-
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
+		}
+		return 0; // break;
 	}
+
+	return 0;
 }
 
-// thread control
-void Pintool_Analysis_Thread(THREADID threadid) {
-	if (threadid != 0) {
-		*fout << "thread: " << threadid << " exit" << endl;
-		fout->flush();
-		PIN_ExitThread(0);
-	}
+
+// after checking obfuscated calls, dump and terminate.		
+void DoFinalize() {
+	PIN_SemaphoreSet(&sem_resolve_api_end);
+	PIN_SemaphoreWait(&sem_dump_finished);
+	((ofstream*)fout)->close();
+	PIN_ExitProcess(-1);
 }
 
 
 // API Detect executable trace analysis function
-void Pintool_Analysis_TRC_API(CONTEXT *ctxt, ADDRINT addr, bool is_ret, THREADID threadid)
+void Analysis_TRC_API(CONTEXT *ctxt, ADDRINT addr, bool is_ret, THREADID threadid)
 {	
 	if (threadid != 0) {
-		*fout << "thread: " << threadid << " exit" << endl;
-		fout->flush();
-		PIN_ExitThread(0);
 		return;
-	}
-
-	if (curr_obf_call && curr_obf_call->src == 0x7af1f26e) {
-		*fout << "DEBUG: tid:" << threadid << ' ' << toHex(addr) << ' ' << run_until_api_function_status << endl;
-		fout->flush();
 	}
 
 	if (oep == 0) return;
-#if LOG_TRACE == 1
-	if (IsMainImage(addr)) {
-		*fout << "Trace:" << toHex(addr) << endl;
-	}
-#endif	
 
-	if (curr_obf_call && (curr_obf_call->src == 0x78601b7f || curr_obf_call->src == 0x785ff26e)) {
-		*fout << "DEBUG: " << toHex(addr) << ' ' << run_until_api_function_status << endl;
+	while (true) {
+		*fout << "DEBUG: " << threadid << ' ' << toHex(addr) << ' ' << run_until_api_function_status << endl;
 		fout->flush();
-	}
 
-	if (run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckCurrentFunction) {
-		CheckAddressAPI(addr, ctxt, is_ret);
-
-		if (curr_obf_call && (curr_obf_call->src == 0x78601b7f || curr_obf_call->src == 0x785ff26e)) {
-			*fout << "DEBUG: HERE " << run_until_api_function_status << endl;
-			fout->flush();
+		if (run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckCurrentFunction) {
+			auto res = DoRunUntilAPI(ctxt, addr, is_ret);
+			if (res == 0) break;
+			else if (res == 1) continue;
 		}
-		return;
-	}
 
-check_next_obfuscated_api_function_candidate:
-	// For each obfuscated call instruction,
-	// check whether the execution trace go into API function.
-	// Therefore IP is changed into obfuscated function call one by one
-	if (run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckNextFunction) {		
-		CheckNextObfuscatedAPIFunctionCandidate(ctxt);
-		return;
-	}
+		else if (run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckNextCall) {
+			ToNextObfCall(ctxt);
+		}
 
+		if (run_until_api_function_status == RunUntilAPIFunctionStatus::kFinalize) {
+			DoFinalize();			
+		}
 
-	if (run_until_api_function_status == RunUntilAPIFunctionStatus::kFinalize) {
-		// after checking obfuscated calls, terminate.		
-		PIN_SemaphoreSet(&sem_resolve_api_end);
-		PIN_SemaphoreWait(&sem_dump_finished);
-		((ofstream*)fout)->close();
-		PIN_ExitProcess(-1);
-		return;
-	}
+		break;
+	}	// end of while loop	
 }
 
 // API Detect executable trace instrumentation function
-void Pintool_Instrument_TRC(TRACE trace, void *v)
+void Instrument_TRC(TRACE trace, void *v)
 {	
 	ADDRINT addr = TRACE_Address(trace);
 
-	bool is_ret = INS_IsRet(BBL_InsTail(TRACE_BblHead(trace)));	
+	INS last_ins = BBL_InsTail(TRACE_BblTail(trace));
+	ADDRINT last_addr = INS_Address(last_ins);
+	// bool is_ret = INS_IsRet(BBL_InsTail(TRACE_BblHead(trace)));	
+	bool is_ret = INS_IsRet(last_ins);
 
-	if (oep) {
-		TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_Thread, IARG_THREAD_ID, IARG_END);
+
+	if (curr_obf_fn_pos == 13) {
+		*fout << "!! " << toHex(addr) << endl;
+		BBL bbl;
+		INS ins;
+		for (bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
+		{
+			for (ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+			{
+
+				INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)Analysis_INS_LOG,
+					IARG_CONTEXT,
+					IARG_INST_PTR,
+					IARG_THREAD_ID,
+					IARG_END);
+				
+			}
+		}
 	}
 
 	if (!oep) {
-		TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_TRC_OEP,
+		TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)Analysis_TRC_OEP,
 			IARG_CONTEXT,
 			IARG_ADDRINT, addr,
 			IARG_BOOL, is_ret,
@@ -1637,49 +1552,48 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 			IARG_END);
 	}
 	else if (
-		run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckNextFunction ||
+		run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckNextCall ||
 		run_until_api_function_status == RunUntilAPIFunctionStatus::kCheckCurrentFunction) {
 
+		if (is_ret && packer_type == "vmp") {			
+			INS_InsertCall(last_ins, IPOINT_BEFORE, (AFUNPTR)Analysis_INS_API,
+				IARG_CONTEXT, 
+				IARG_ADDRINT, last_addr, 
+				IARG_ADDRINT, InsType::kRET, 
+				IARG_THREAD_ID,
+				IARG_END);
 
-		TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_TRC_API,
-			IARG_CONTEXT,
-			IARG_ADDRINT, addr,
-			IARG_BOOL, is_ret,
-			IARG_THREAD_ID,
-			IARG_END);
-		BBL bbl;
-		INS ins;
-		for (bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
-		{
-			if (curr_obf_call && curr_obf_call->src == 0x7af1f26e) {
-				*fout << "DEBUG: BBL address: " << toHex(BBL_Address(bbl)) << endl;
-			}
-			for (ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+		}
+		else {
+			TRACE_InsertCall(trace, IPOINT_BEFORE, (AFUNPTR)Analysis_TRC_API,
+				IARG_CONTEXT,
+				IARG_ADDRINT, addr,
+				IARG_BOOL, is_ret,
+				IARG_THREAD_ID,
+				IARG_END);
+		}
+		
+		if (curr_obf_fn_pos == 13) {
+			BBL bbl;
+			INS ins;
+			for (bbl = TRACE_BblHead(trace); BBL_Valid(bbl); bbl = BBL_Next(bbl))
 			{
-				if (curr_obf_call && curr_obf_call->src == 0x7af1f26e) {
-					*fout << "DEBUG: INS: " << toHex(INS_Address(ins)) << ' ' << INS_Disassemble(ins) << endl;
+				for (ins = BBL_InsHead(bbl); INS_Valid(ins); ins = INS_Next(ins))
+				{
+					*fout << " I " << toHex(INS_Address(ins)) << ' ' << INS_Disassemble(ins) << endl;
+					InsType it = InsType::kOTHER;
+					if (INS_Mnemonic(ins) == "POPFD" || INS_Mnemonic(ins) == "POPFQ") {
+						it = InsType::kPOPF;
+						*fout << "# POPF @ " << toHex(addr) << ' ' << INS_Disassemble(ins) << endl;
+					}
+					else if (INS_Mnemonic(ins) == "RET" || INS_Mnemonic(ins) == "RET_NEAR") {
+						it = InsType::kRET;
+						*fout << "# RET @ " << toHex(addr) << ' ' << INS_Disassemble(ins) << endl;
+					}
 				}
-
-				InsType it = InsType::kOTHER;
-				if (INS_Mnemonic(ins) == "POPFD" || INS_Mnemonic(ins) == "POPFQ") {
-					it = InsType::kPOPF;
-					*fout << toHex(addr) << ' ' << INS_Disassemble(ins) << endl;
-				}
-				else if (INS_Mnemonic(ins) == "RET" || INS_Mnemonic(ins) == "RET_NEAR") {
-					it = InsType::kRET;			
-				}
-				if (it != InsType::kOTHER || curr_obf_call && curr_obf_call->src == 0x7af1f26e) {
-					INS_InsertCall(ins, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_INS_API,
-						IARG_THREAD_ID, 
-						IARG_ADDRINT, it,
-						IARG_CONTEXT,
-						IARG_INST_PTR,
-						IARG_END);
-
-				}
-				
 			}
 		}
+		
 	}
 
 	trace_cache_m[addr] = new vector<ADDRINT>;
@@ -1718,7 +1632,7 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 				prev_ins = ins;
 				if (INS_IsFarRet(ins))
 				{
-					run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
+					run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextCall;
 					*fout << "# Far Ret !!!" << endl;
 				}
 				if (INS_Mnemonic(ins) == "XRSTOR") continue;
@@ -1744,13 +1658,13 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 					}
 					if (is_mem_read) {
 						INS_InsertPredicatedCall(
-							ins, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_INS_MemoryRead,
+							ins, IPOINT_BEFORE, (AFUNPTR)Analysis_INS_MR,
 							IARG_MEMORYREAD_EA,
 							IARG_END);
 					}
 					if (is_mem_write) {
 						INS_InsertPredicatedCall(
-							ins, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_INS_MemoryWrite,
+							ins, IPOINT_BEFORE, (AFUNPTR)Analysis_INS_MW,
 							IARG_INST_PTR,
 							IARG_MEMORYWRITE_SIZE,
 							IARG_MEMORYWRITE_EA,
@@ -1762,7 +1676,7 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 					{
 						// record write addresses to detect OEP
 						INS_InsertPredicatedCall(
-							ins, IPOINT_BEFORE, (AFUNPTR)Pintool_Analysis_INS_MemoryWrite,
+							ins, IPOINT_BEFORE, (AFUNPTR)Analysis_INS_MW,
 							IARG_INST_PTR,
 							IARG_MEMORYWRITE_SIZE,
 							IARG_MEMORYWRITE_EA,
@@ -1776,8 +1690,7 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 
 
 	// check last ins
-	BBL tail_bbs = TRACE_BblTail(trace);
-	INS last_ins = BBL_InsTail(tail_bbs);
+	BBL tail_bbs = TRACE_BblTail(trace);	
 	string mne = INS_Mnemonic(last_ins);
 	if (oep) {		
 		if (!INS_IsControlFlow(last_ins) &&
@@ -1791,7 +1704,7 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 			*fout << INS_IsControlFlow(last_ins) << endl;
 			*fout << INS_Stutters(last_ins) << endl;
 			*fout << INS_Disassemble(last_ins) << endl;
-			run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
+			run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextCall;
 			return;
 		}
 	}	
@@ -1808,7 +1721,7 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 			auto info = GetModuleInfo(tgt);
 			if (info == NULL) {
 				*fout << "skip" << endl;
-				run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
+				run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextCall;
 				return;
 			}
 		}
@@ -1819,29 +1732,126 @@ void Pintool_Instrument_TRC(TRACE trace, void *v)
 ////////////
 // API deobfuscation instruction validity checking
 ////////////
-void Pintool_Analysis_INS_API(THREADID tid, ADDRINT it, CONTEXT* ctxt, ADDRINT addr) 
+void Analysis_INS_API(CONTEXT* ctxt, ADDRINT addr, ADDRINT it, THREADID tid)
 {	
-	if (curr_obf_call && curr_obf_call->src == 0x7af1f26e) {
-		*fout << "DEBUG: " << tid << " (INS): addr=" << toHex(addr) << ' ' << it << endl;
-	}
-
+	if (tid != 0) return;
+	*fout << "Analysis_INS_API " << toHex(addr) << endl;
+	fout->flush();
 	InsType ins_typ = (InsType)it;
 	if (ins_typ == InsType::kOTHER) {
 		return;
 	}
+
 	if (ins_typ == InsType::kPOPF) {		
 		ADDRINT const stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);
 		ADDRINT stktop = *XED_STATIC_CAST(const ADDRINT*, stkptr);
 		*fout << toHex(stkptr) << ' ' << toHex(stktop) << endl;
 		if (stktop & 0b100000000) {
 			*fout << "TF" << endl;
-			CheckNextObfuscatedAPIFunctionCandidate(ctxt);
+			run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextCall;
+			// TODO
 		}
 	}
+
 	if (ins_typ == InsType::kRET) {
 		*fout << "DEBUG: Checking RET" << endl;
-		CheckAddressAPI(addr, ctxt, true);
+		// Check call/jmp
+		// Compare stack top to check the return address which points to the next to the caller instruction. 		
+		ADDRINT adjusted_caller_addr;
+		string call_type;
+		ObfuscatedCallType ty;
+		
+		// return value has an API address
+		ADDRINT stkptr = PIN_GetContextReg(ctxt, REG_STACK_PTR);
+		ADDRINT stk_top_val = *((ADDRINT*)stkptr);
+		stk_top_val = *((ADDRINT*)stkptr);
+		
+		auto fninfo = GetFunctionInfo(stk_top_val);		
+		if (!fninfo) {
+			ToNextObfCall(ctxt);
+		}
+
+		*fout << '[' << toHex(stkptr) << "]=" << toHex(stk_top_val) << ' ' << *fninfo << endl;
+
+		// return value at the stack top
+		stkptr += ADDRSIZE;
+		stk_top_val = *((ADDRINT*)stkptr);
+
+		*fout << '[' << toHex(stkptr) << "]=" << toHex(stk_top_val) << endl;
+
+		INT32 stk_diff = trace_stack_pointer_sequence[0] - stkptr;		
+		*fout << "Stack Difference = " << toHex(stk_diff) << endl;
+		if (stk_diff != 0 && stk_diff != ADDRSIZE && stk_diff != -ADDRSIZE)
+		{
+			*fout << "Check call/jmp" << endl;
+			*fout << *fninfo << endl;
+			*fout << toHex(trace_stack_pointer_sequence[0]) << endl;
+			*fout << toHex(stkptr) << endl;
+			fout->flush();			
+			ToNextObfCall(ctxt);
+		}
+
+		else if (stk_top_val == curr_obf_call->src + 5 || stk_top_val == curr_obf_call->src + 6) {
+			call_type = "call";
+			ty = ObfuscatedCallType::kINDIRECT_CALL;
+			if (stk_top_val == curr_obf_call->src + 6)
+			{
+				adjusted_caller_addr = curr_obf_call->src;
+			}
+			else if (stk_top_val == curr_obf_call->src + 5)
+			{
+				adjusted_caller_addr = curr_obf_call->src - 1;
+			}
+			else
+			{
+				ToNextObfCall(ctxt);								
+			}
+		}
+		else
+		{
+			call_type = "goto";
+			ty = ObfuscatedCallType::kINDIRECT_JMP;
+			if (stk_diff == 0)
+			{
+				adjusted_caller_addr = curr_obf_call->src;
+			}
+			else if (stk_diff == -ADDRSIZE)
+			{
+				adjusted_caller_addr = curr_obf_call->src - curr_obf_call->n_prev_pad_bytes;
+			}
+			else
+			{
+				ToNextObfCall(ctxt);
+			}
+		}
+
+		DLOG(LogType::kLOG_CALL_CHECK, "# Caller address: " << toHex(curr_obf_call->src) << endl);
+		DLOG(LogType::kLOG_CALL_CHECK, "# return address: " << toHex(stk_top_val) << endl);
+		DLOG(LogType::kLOG_CALL_CHECK, "# next to Caller: " << trace_next_addr_m[curr_obf_call->src] << endl);
+		DLOG(LogType::kLOG_CALL_CHECK, "# SP before call: " << trace_stack_pointer_sequence[0] << endl);
+		DLOG(LogType::kLOG_CALL_CHECK, "# SP at API func: " << stkptr << endl);
+		DLOG(LogType::kLOG_CALL_CHECK, "# call type     : " << call_type << endl);
+		*fout << "ADDR:" << toHex(addr) << endl;
+		if (addr != fninfo->saddr) DLOG(LogType::kLOG_CALL_CHECK, "branch into the middle of API function\n");
+
+		DLOG(LogType::kLOG_CALL_CHECK,
+			toHex(adjusted_caller_addr - main_image_start_address) << '\t' <<
+			call_type << '\t' <<
+			fninfo->module_name << '\t' <<
+			fninfo->name << endl);
+
+		obf_calls.push_back(ObfuscatedCall(adjusted_caller_addr, fninfo->saddr, 0, ty, "", 0));
+		obfaddr2fn[curr_obf_call->src] = fninfo;
+
+		ToNextObfCall(ctxt);
 	}
+}
+
+
+void Analysis_INS_LOG(CONTEXT* ctxt, ADDRINT addr, THREADID tid)
+{
+	*fout << "# Analysis_INS_LOG " <<toHex(tid) << ' ' << toHex(addr) << endl;
+
 }
 
 
@@ -1887,8 +1897,8 @@ void FixIAT()
 		fnaddr = imp.func_addr;
 		if (fnaddr == 0) {
 			for (auto obf_call : obf_calls) {
-				if (obf_call.indaddr == 0) continue;
-				if (addr == obf_call.indaddr) {
+				if (obf_call.ind_addr == 0) continue;
+				if (addr == obf_call.ind_addr) {
 					fnaddr = obf_call.dst;
 					imp.func_addr = fnaddr;
 					auto fn = GetFunctionInfo(fnaddr);
@@ -1925,7 +1935,7 @@ void FixCall()
 		for (auto &[_, iat_info] : iat_elem_by_addr) {
 			if (iat_info.func_addr == obf_call.dst) {
 				DLOG(LogType::kLOG_DUMP, toHex(obf_call.src) << ' ' << obf_call.GetMnem() << ' ' << iat_info.dll_name << ' ' << iat_info.func_name << endl);
-				obf_call.indaddr = iat_info.addr;
+				obf_call.ind_addr = iat_info.addr;
 				pc = reinterpret_cast<unsigned char*>(obf_call.src);				
 				sz = obf_call.ToBytes(byts);
 				size_t num_copied = PIN_SafeCopyEx(pc, byts, sz, &pExinfo);
@@ -2763,7 +2773,7 @@ void DumpUnpackedFile_Overlay()
 
 
 // EXE INS memory write analysis function 
-void Pintool_Analysis_INS_MemoryWrite(ADDRINT addr, size_t mSize, ADDRINT targetAddr)
+void Analysis_INS_MW(ADDRINT addr, size_t mSize, ADDRINT targetAddr)
 {
 	SetMemoryPageWrite(targetAddr);
 
@@ -2788,7 +2798,7 @@ void Pintool_Analysis_INS_MemoryWrite(ADDRINT addr, size_t mSize, ADDRINT target
 }
 
 // EXE INS memory read analysis function 
-void Pintool_Analysis_INS_MemoryRead(ADDRINT targetAddr)
+void Analysis_INS_MR(ADDRINT targetAddr)
 {
 	FunctionInformation *finfo = GetFunctionInfo(targetAddr);
 	if (finfo == NULL) return;
@@ -2802,7 +2812,7 @@ void Pintool_Analysis_INS_MemoryRead(ADDRINT targetAddr)
 // ========================================================================================================================
 
 // IMG instrumentation function for EXE files
-void Pintool_Instrument_IMG(IMG img, void *v)
+void Instrument_IMG(IMG img, void *v)
 {
 	// Trim image name
 	string imgname = IMG_Name(img);
@@ -3072,8 +3082,7 @@ VOID UnpackThread(VOID* arg)
 			DLOG(LogType::kLOG_CALL_CHECK, e << endl);
 		}
 
-		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextFunction;
-		curr_obf_fn_pos = 183;
+		run_until_api_function_status = RunUntilAPIFunctionStatus::kCheckNextCall;
 		PIN_SemaphoreWait(&sem_resolve_api_end);
 	}	
 	LOG(msg_hdr + "Resolving obfuscated API Calls finished.\n");
@@ -3190,7 +3199,7 @@ void ReadIntermediateResult(string filename)
 		}
 
 		if (current_status == "OBFUSCATED_CALL_CANDIDATES") {
-			ss >> call_ty >> hex >> obfcall.src >> hex >> obfcall.dst >> obfcall.n_prev_pad_byts;
+			ss >> call_ty >> hex >> obfcall.src >> hex >> obfcall.dst >> obfcall.n_prev_pad_bytes;
 			obfcall.ins_type = ParseObfuscatedCallType(call_ty);
 			obf_call_candidates.push_back(obfcall);
 		}
@@ -3259,7 +3268,7 @@ void WriteIntermediateResult(string filename)
 	ir_out << "]" << endl;
 	ir_out << "OBFUSCATED_CALL_CANDIDATES=[" << endl;
 	for (auto e : obf_call_candidates) {
-		ir_out << "\t[" << e.ins_type << ',' << toHex(e.src - main_image_start_address) << ' ' << toHex(e.dst - main_image_start_address) << ' ' << e.n_prev_pad_byts << endl;
+		ir_out << "\t[" << e.ins_type << ',' << toHex(e.src - main_image_start_address) << ' ' << toHex(e.dst - main_image_start_address) << ' ' << e.n_prev_pad_bytes << endl;
 	}	
 	ir_out << "]" << endl;
 	ir_out << "DEOBFUSCATED CALLS" << endl;
@@ -3347,11 +3356,11 @@ int main(int argc, char* argv[])
 	PIN_AddThreadFiniFunction(ThreadFini, 0);
 
 	// Image Instrumentation
-	IMG_AddInstrumentFunction(Pintool_Instrument_IMG, 0);
+	IMG_AddInstrumentFunction(Instrument_IMG, 0);
 
 	// Register function to be called to instrument traces
 	if (packer_type == "vmp" || packer_type == "tmd3" || packer_type == "tmd2" || packer_type == "enigma") {
-		TRACE_AddInstrumentFunction(Pintool_Instrument_TRC, 0);		
+		TRACE_AddInstrumentFunction(Instrument_TRC, 0);		
 	}
 
 	// exception handling

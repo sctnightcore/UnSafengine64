@@ -46,15 +46,18 @@ struct ObfuscatedCall {
 
 	ObfuscatedCall() {};
 	ObfuscatedCall(ADDRINT sa, ADDRINT da, ADDRINT ia, ObfuscatedCallType it, string r, size_t g) : 
-		src(sa), dst(da), indaddr(ia), ins_type(it), reg(r), n_prev_pad_byts(g) {};
+		src(sa), dst(da), ind_addr(ia), ins_type(it), reg(r), n_prev_pad_bytes(g) {
+		next_addr = sa + 6;
+	};
 
 	ADDRINT src;
 	ADDRINT dst;
-	ADDRINT indaddr;
+	ADDRINT ind_addr;
+	ADDRINT next_addr;
 	
 	ObfuscatedCallType ins_type;
 	string reg;
-	size_t n_prev_pad_byts;
+	size_t n_prev_pad_bytes;
 
 	string GetMnem() {
 		switch (ins_type) {
@@ -82,10 +85,10 @@ struct ObfuscatedCall {
 			byts[0] = 0xff;
 			byts[1] = 0x15;
 			if (ADDRSIZE == 4) {				
-				ADDRINT_TO_BYTES(indaddr, byts + 2);
+				ADDRINT_TO_BYTES(ind_addr, byts + 2);
 			}
 			else {
-				reladdr = indaddr - (src + 6);
+				reladdr = ind_addr - (src + 6);
 				ADDRINT_TO_BYTES(reladdr, byts + 2);
 			}
 			return 6;
@@ -93,10 +96,10 @@ struct ObfuscatedCall {
 			byts[0] = 0xff;
 			byts[1] = 0x25;
 			if (ADDRSIZE == 4) {
-				ADDRINT_TO_BYTES(indaddr, byts + 2);
+				ADDRINT_TO_BYTES(ind_addr, byts + 2);
 			} 
 			else {
-				reladdr = indaddr - (src + 6);
+				reladdr = ind_addr - (src + 6);
 				ADDRINT_TO_BYTES(reladdr, byts + 2);
 			}
 			return 6;
@@ -109,7 +112,7 @@ struct ObfuscatedCall {
 				else if (reg == "edx") byts[1] = 0x15;
 				else if (reg == "esi") byts[1] = 0x35;
 				else if (reg == "edi") byts[1] = 0x3d;	
-				ADDRINT_TO_BYTES(indaddr, byts + 2);
+				ADDRINT_TO_BYTES(ind_addr, byts + 2);
 				return 6;
 			}
 			else {	// 64bit
@@ -121,7 +124,7 @@ struct ObfuscatedCall {
 				else if (reg == "rdx") byts[2] = 0x15;
 				else if (reg == "rsi") byts[2] = 0x35;
 				else if (reg == "rdi") byts[2] = 0x3d;
-				reladdr = indaddr - (src + 7);
+				reladdr = ind_addr - (src + 7);
 				ADDRINT_TO_BYTES(reladdr, byts + 3);
 				return 7;
 			}		
@@ -134,10 +137,10 @@ struct ObfuscatedCall {
 		ss << '[' <<
 			toHex(src) << ',' <<
 			toHex(dst) << ',' <<
-			toHex(indaddr) << ',' <<
+			toHex(ind_addr) << ',' <<
 			'"' << ins_type << "\"," <<
 			'"' << reg << "\"]" <<
-			n_prev_pad_byts;	
+			n_prev_pad_bytes;	
 		return ss.str();
 	}
 
@@ -154,10 +157,10 @@ struct ObfuscatedCall {
 		ss >>
 			hex >> a.src >> delim >>
 			hex >> a.dst >> delim >>
-			hex >> a.indaddr >> delim >>
+			hex >> a.ind_addr >> delim >>
 			a.ins_type >> delim >>
 			a.reg >> delim >>
-			a.n_prev_pad_byts;
+			a.n_prev_pad_bytes;
 		return true;
 	}
 };
@@ -168,10 +171,10 @@ std::ostream& operator<<(std::ostream& strm, ObfuscatedCall& a) {
 		'[' <<
 		toHex(a.src) << ',' <<
 		toHex(a.dst) << ',' <<
-		toHex(a.indaddr) << ',' <<
+		toHex(a.ind_addr) << ',' <<
 		'"' << a.ins_type << "\"," <<
 		'"' << a.reg << 
-		a.n_prev_pad_byts << 
+		a.n_prev_pad_bytes << 
 		"\"]";
 }
 
@@ -188,12 +191,12 @@ bool is_register_saved = false;
 void RestoreRegisters(LEVEL_VM::CONTEXT* ctxt);
 void SaveRegisters(const LEVEL_VM::CONTEXT* ctxt);
 string PrintRegisters(LEVEL_VM::CONTEXT* ctxt);
-REG CheckRegisterAssignedWithAPIFunctionAddress(LEVEL_VM::CONTEXT* ctxt);
+REG GetRegisterAssignedWithAPIFunctionAddress(LEVEL_VM::CONTEXT* ctxt);
 
 
 enum class RunUntilAPIFunctionStatus {
 	kUninitilaized, 
-	kCheckNextFunction,
+	kCheckNextCall,
 	kCheckCurrentFunction,
 	kFinalize,
 };
@@ -201,7 +204,7 @@ enum class RunUntilAPIFunctionStatus {
 std::ostream& operator<<(std::ostream& strm, const RunUntilAPIFunctionStatus& a) {
 	switch (a) {
 	case RunUntilAPIFunctionStatus::kUninitilaized: return strm << "RUAPI:Uninitialized";
-	case RunUntilAPIFunctionStatus::kCheckNextFunction: return strm << "RUAPI:Check_Next_Function";
+	case RunUntilAPIFunctionStatus::kCheckNextCall: return strm << "RUAPI:Check_Next_Function";
 	case RunUntilAPIFunctionStatus::kCheckCurrentFunction: return strm << "RUAPI:Check_Current_Function";
 	case RunUntilAPIFunctionStatus::kFinalize: return strm << "Return";
 	}
@@ -220,17 +223,20 @@ void AdjustLoadedAddress(ADDRINT delta);
 void ThreadStart(THREADID threadid, CONTEXT *ctxt, INT32 flags, VOID *v);
 void ThreadFini(THREADID threadid, const CONTEXT *ctxt, INT32 code, VOID *v);
 
-void Pintool_Analysis_INS_MemoryWrite(ADDRINT addr, size_t mSize, ADDRINT targetAddr);
-void Pintool_Analysis_INS_MemoryRead(ADDRINT targetAddr);
+void Analysis_INS_MW(ADDRINT addr, size_t mSize, ADDRINT targetAddr);
+void Analysis_INS_MR(ADDRINT targetAddr);
 
-void Pintool_Analysis_TRC_OEP(CONTEXT *ctxt, ADDRINT addr, bool is_ret, THREADID threadid);
-void CheckNextObfuscatedAPIFunctionCandidate(LEVEL_VM::CONTEXT* ctxt);
-void CheckTraceAPI(ADDRINT& addr, LEVEL_VM::CONTEXT* ctxt, bool is_ret, bool& retflag);
-void Pintool_Analysis_TRC_API(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID threadid);
-void Pintool_Analysis_INS_API(THREADID tid, ADDRINT it, CONTEXT* ctxt, ADDRINT addr);
+void Analysis_TRC_OEP(CONTEXT *ctxt, ADDRINT addr, bool is_ret, THREADID threadid);
+void Analysis_TRC_API(CONTEXT* ctxt, ADDRINT addr, bool is_ret, THREADID threadid);
+void Analysis_INS_API(CONTEXT* ctxt, ADDRINT addr, ADDRINT it, THREADID tid);
+void Analysis_INS_LOG(CONTEXT* ctxt, ADDRINT addr, THREADID tid);
 
-void Pintool_Instrument_IMG(IMG img, void* v);
-void Pintool_Instrument_TRC(TRACE trace, void *v);
+void ToNextObfCall(CONTEXT* ctxt);
+int DoRunUntilAPI(CONTEXT* ctxt, ADDRINT addr, bool is_ret);
+void DoFinalize();
+
+void Instrument_IMG(IMG img, void* v);
+void Instrument_TRC(TRACE trace, void *v);
 
 
 // Memory Read Write Helper
